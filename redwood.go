@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/andybalholm/redwood/responseCache"
 )
 
 // Version is the current version number. Fill it in by building with
@@ -21,6 +23,24 @@ import (
 var Version string
 
 func main() {
+	// // Create a CPU profile file
+	// f, err := os.Create("profile.prof")
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// defer f.Close()
+
+	// // Start CPU profiling
+	// if err := pprof.StartCPUProfile(f); err != nil {
+	// 	panic(err)
+	// }
+	// defer pprof.StopCPUProfile()
+	// // Set up a timer that will stop the CPU profiling after 10 seconds
+	// timer := time.AfterFunc(time.Second*30, func() {
+	// 	pprof.StopCPUProfile()
+	// })
+	// defer timer.Stop()
+
 	if Version != "" {
 		log.Println("Redwood", Version)
 	}
@@ -56,6 +76,8 @@ func main() {
 	if conf.CloseIdleConnections > 0 {
 		httpTransport.IdleConnTimeout = conf.CloseIdleConnections
 	}
+
+	responseCache.Init()
 
 	portsListening := 0
 

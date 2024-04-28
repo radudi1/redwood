@@ -27,6 +27,8 @@ import (
 	"go.starlark.net/starlark"
 	"golang.org/x/crypto/cryptobyte"
 	"golang.org/x/net/http2"
+
+	"github.com/andybalholm/redwood/responseCache"
 )
 
 // Intercept TLS (HTTPS) connections.
@@ -642,6 +644,10 @@ func (s *singleListener) Addr() net.Addr {
 // self-signed.
 func imitateCertificate(serverCert *x509.Certificate, selfSigned bool, sni string) (cert tls.Certificate, err error) {
 	conf := getConfig()
+	fakeCert, found := responseCache.GetFakeCert(serverCert, conf.TLSCert.PrivateKey)
+	if found {
+		return fakeCert, nil
+	}
 	// Use a hash of the real certificate (plus some other things) as the serial number.
 	h := md5.New()
 	h.Write(serverCert.Raw)
@@ -670,10 +676,10 @@ func imitateCertificate(serverCert *x509.Certificate, selfSigned bool, sni strin
 
 	// If sni is not blank, make a certificate that covers only that domain,
 	// instead of all the domains covered by the original certificate.
-	if sni != "" {
-		template.DNSNames = []string{sni}
-		template.Subject.CommonName = sni
-	}
+	// if sni != "" {
+	// 	template.DNSNames = []string{sni}
+	// 	template.Subject.CommonName = sni
+	// }
 
 	var newCertBytes []byte
 	if selfSigned {
@@ -693,6 +699,7 @@ func imitateCertificate(serverCert *x509.Certificate, selfSigned bool, sni strin
 	if !selfSigned {
 		newCert.Certificate = append(newCert.Certificate, conf.TLSCert.Certificate...)
 	}
+	responseCache.SetCertAsValid(serverCert, &newCert)
 	return newCert, nil
 }
 
@@ -730,6 +737,9 @@ func fakeCertificate(sni string) (cert tls.Certificate, err error) {
 }
 
 func validCert(cert *x509.Certificate, intermediates []*x509.Certificate) bool {
+	if responseCache.IsCertValid(cert) {
+		return true
+	}
 	conf := getConfig()
 	pool := certPoolWith(intermediates)
 	_, err := cert.Verify(x509.VerifyOptions{Intermediates: pool})

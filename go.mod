@@ -1,6 +1,7 @@
 module github.com/andybalholm/redwood
 
 require (
+	github.com/BurntSushi/toml v1.3.2
 	github.com/andybalholm/brotli v1.1.0
 	github.com/andybalholm/cascadia v1.3.2
 	github.com/andybalholm/dhash v1.0.0
@@ -13,7 +14,9 @@ require (
 	github.com/miekg/dns v1.1.59
 	github.com/open-ch/ja3 v1.0.1
 	github.com/qri-io/starlib v0.5.0
+	github.com/redis/go-redis/v9 v9.5.1
 	github.com/remogatto/ftpget v0.0.0-20120222025949-5c3c8286a3b0
+	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zeebo/xxh3 v1.0.2
 	go.starlark.net v0.0.0-20240411212711-9b43f0afd521
 	golang.org/x/crypto v0.22.0
@@ -28,14 +31,18 @@ require (
 	github.com/andybalholm/go-bit v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/chzyer/readline v1.5.1 // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dlclark/regexp2 v1.11.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/dustmop/soup v1.1.2-0.20190516214245-38228baa104e // indirect
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
 	github.com/golang/glog v1.2.1 // indirect
-	github.com/google/pprof v0.0.0-20240416155748-26353dc0451f // indirect
+	github.com/google/pprof v0.0.0-20240424215950-a892ee059fd6 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.7 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/radudi1/prioworkers v0.0.0-20240423085029-c180a8bfc20e
+	github.com/radudi1/stopwatch v0.0.0-20240427084450-6fb736cb06b1
+	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	golang.org/x/mod v0.17.0 // indirect
 	golang.org/x/sync v0.7.0 // indirect
 	golang.org/x/sys v0.19.0 // indirect
@@ -43,4 +50,4 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
-go 1.18
+go 1.22.2
