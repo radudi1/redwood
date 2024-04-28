@@ -28,6 +28,7 @@ import (
 	"github.com/andybalholm/brotli"
 	"github.com/andybalholm/cascadia"
 	"github.com/andybalholm/dhash"
+	"github.com/andybalholm/redwood/responseCache"
 	"github.com/baruwa-enterprise/clamd"
 	"github.com/dustmop/soup"
 	"github.com/golang/gddo/httputil"
@@ -196,7 +197,7 @@ func (h proxyHandler) ServeHTTPAuthenticated(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if r.Method == "CONNECT" && getConfig().TLSReady {
+	if r.Method == "CONNECT" && getConfig().TLSReady && responseCache.BumpAllowed(r) {
 		// SSLBump takes priority overy any action besides require-auth, because showing a block page
 		// doesn't work till after the connection is bumped.
 		conn, err := newHijackedConn(w)
@@ -288,6 +289,11 @@ func (h proxyHandler) ServeHTTPAuthenticated(w http.ResponseWriter, r *http.Requ
 	}
 
 	getConfig().changeQuery(r.URL)
+
+	respCacheFound, respCacheStats := responseCache.Get(w, r)
+	if respCacheFound {
+		return
+	}
 
 	var rt http.RoundTripper
 	switch {
@@ -401,17 +407,22 @@ func (h proxyHandler) ServeHTTPAuthenticated(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if response.Response.ContentLength > 0 {
+	responseCache.Set(response.Request.Request, response.Response, respCacheStats)
+
+	if response.Response.ContentLength > 0 && int(response.Response.StatusCode/100) != 1 && response.Response.StatusCode != 204 && response.Response.StatusCode != 304 {
 		w.Header().Set("Content-Length", strconv.FormatInt(response.Response.ContentLength, 10))
 	}
 	copyResponseHeader(w, resp)
-	n, err := io.Copy(w, response.Response.Body)
-	if err != nil {
-		if err != context.Canceled {
-			log.Printf("error while copying response (URL: %s): %s", r.URL, err)
-		}
-		if ct, ok := rt.(*connTransport); ok {
-			ct.Conn.Close()
+	n := int64(0)
+	if int(response.Response.StatusCode/100) != 1 && response.Response.StatusCode != 204 && response.Response.StatusCode != 304 {
+		n, err = io.Copy(w, response.Response.Body)
+		if err != nil {
+			if err != context.Canceled {
+				log.Printf("error while copying response (URL: %s): %s", r.URL, err)
+			}
+			if ct, ok := rt.(*connTransport); ok {
+				ct.Conn.Close()
+			}
 		}
 	}
 
@@ -834,7 +845,7 @@ func (ln tcpKeepAliveListener) Accept() (c net.Conn, err error) {
 		return
 	}
 	tc.SetKeepAlive(true)
-	tc.SetKeepAlivePeriod(3 * time.Minute)
+	tc.SetKeepAlivePeriod(60 * time.Minute)
 	return tc, nil
 }
 

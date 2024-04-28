@@ -1,8 +1,9 @@
 module github.com/andybalholm/redwood
 
 require (
-	github.com/andybalholm/brotli v1.1.1
-	github.com/andybalholm/cascadia v1.3.3
+	github.com/BurntSushi/toml v1.3.2
+	github.com/andybalholm/brotli v1.1.0
+	github.com/andybalholm/cascadia v1.3.2
 	github.com/andybalholm/dhash v1.0.0
 	github.com/baruwa-enterprise/clamd v1.0.1
 	github.com/dgraph-io/ristretto v0.2.0
@@ -13,7 +14,9 @@ require (
 	github.com/miekg/dns v1.1.65
 	github.com/open-ch/ja3 v1.0.1
 	github.com/qri-io/starlib v0.5.0
+	github.com/redis/go-redis/v9 v9.5.1
 	github.com/remogatto/ftpget v0.0.0-20120222025949-5c3c8286a3b0
+	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zeebo/xxh3 v1.0.2
 	go.starlark.net v0.0.0-20250417143717-f57e51f710eb
 	golang.org/x/crypto v0.37.0
@@ -28,19 +31,23 @@ require (
 	github.com/andybalholm/go-bit v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/chzyer/readline v1.5.1 // indirect
-	github.com/dlclark/regexp2 v1.11.5 // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
+	github.com/dlclark/regexp2 v1.11.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/dustmop/soup v1.1.2-0.20190516214245-38228baa104e
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
-	github.com/google/pprof v0.0.0-20250418163039-24c5476c6587 // indirect
-	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
-	github.com/magnetde/starlark-re v0.1.2
+	github.com/golang/glog v1.2.1 // indirect
+	github.com/google/pprof v0.0.0-20240424215950-a892ee059fd6 // indirect
+	github.com/klauspost/cpuid/v2 v2.2.7 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	golang.org/x/mod v0.24.0 // indirect
-	golang.org/x/sync v0.13.0 // indirect
-	golang.org/x/sys v0.32.0 // indirect
-	golang.org/x/tools v0.32.0 // indirect
+	github.com/radudi1/prioworkers v0.0.0-20240423085029-c180a8bfc20e
+	github.com/radudi1/stopwatch v0.0.0-20240427084450-6fb736cb06b1
+	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
+	golang.org/x/mod v0.17.0 // indirect
+	golang.org/x/sync v0.7.0 // indirect
+	golang.org/x/sys v0.19.0 // indirect
+	golang.org/x/tools v0.20.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
-go 1.24
+go 1.22.2
