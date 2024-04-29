@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -80,16 +81,18 @@ func reEncode(dstBuf *bytes.Buffer, content *[]byte, fromEncoding string, accept
 	return
 }
 
-func splitHeader(str string, delimiter string) map[string]string {
+func splitHeader(headers *http.Header, headerName string, delimiter string) map[string]string {
 	res := make(map[string]string)
-	strArr := strings.Split(str, delimiter)
-	for _, v := range strArr {
-		elem := strings.ToLower(v)
-		elemParts := strings.SplitN(elem, "=", 2)
-		if len(elemParts) > 1 {
-			res[strings.TrimSpace(elemParts[0])] = strings.TrimSpace(elemParts[1])
-		} else {
-			res[strings.TrimSpace(elemParts[0])] = ""
+	for _, hdrVal := range headers.Values(headerName) {
+		strArr := strings.Split(hdrVal, delimiter)
+		for _, v := range strArr {
+			elem := strings.ToLower(v)
+			elemParts := strings.SplitN(elem, "=", 2)
+			if len(elemParts) > 1 {
+				res[strings.TrimSpace(elemParts[0])] = strings.TrimSpace(elemParts[1])
+			} else {
+				res[strings.TrimSpace(elemParts[0])] = ""
+			}
 		}
 	}
 	return res
