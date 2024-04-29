@@ -68,7 +68,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats stopWatche
 	if req.Method != "GET" && req.Method != "HEAD" {
 		return
 	}
-	cacheControl := splitHeader(req.Header.Get("Cache-Control"), ",")
+	cacheControl := splitHeader(&req.Header, "Cache-Control", ",")
 	if MapHasKey(cacheControl, "no-cache") || MapHasKey(cacheControl, "no-store") || MapHasKey(cacheControl, "must-revalidate") || cacheControl["max-age"] == "0" {
 		return
 	}
@@ -124,7 +124,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats stopWatche
 	// check if body needs reencoding (compression algo not supported by client)
 	respEncoding := cacheObj.Headers.Get("Content-Encoding")
 	if respEncoding != "" {
-		acceptEncoding := splitHeader(req.Header.Get("Accept-Encoding"), ",")
+		acceptEncoding := splitHeader(&req.Header, "Accept-Encoding", ",")
 		if !MapHasKey(acceptEncoding, respEncoding) {
 			var encodedBuf bytes.Buffer
 			encoding, reEncodeErr := reEncode(&encodedBuf, &cacheObj.Body, respEncoding, acceptEncoding)
@@ -199,7 +199,8 @@ func Set(req *http.Request, resp *http.Response, stats stopWatches) {
 		logStatus = "UC_AUTHVARY"
 		return
 	}
-	cacheControl := splitHeader(resp.Header.Get("Cache-Control"), ",")
+	log.Println(resp.Header.Values("Cache-Control"))
+	cacheControl := splitHeader(&resp.Header, "Cache-Control", ",")
 	if MapHasKey(cacheControl, "private") || MapHasKey(cacheControl, "no-cache") || MapHasKey(cacheControl, "no-store") {
 		logStatus = "UC_CACHECTRL"
 		return
@@ -337,7 +338,7 @@ func updateTtlWorker(redisConn *redis.Client) {
 		if respHeaders.Get("Date") == "" {
 			return
 		}
-		cacheControl := splitHeader(respHeaders.Get("Cache-Control"), ",")
+		cacheControl := splitHeader(respHeaders, "Cache-Control", ",")
 		maxAge := getMaxAge(cacheControl, respHeaders)
 		if maxAge < 1 {
 			return
