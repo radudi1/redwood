@@ -36,6 +36,17 @@ type stopWatches struct {
 	getSw, setSw stopwatch.StopWatch
 }
 
+// cacheable http response codes
+// ALWAYS ORDERED ASCENDING
+var cacheableStatusCodes = [...]int{
+	200, // ok
+	203, // transformed by proxy
+	204, // no content
+	301, // moved permanently
+	302, // found
+	308, // permanent redirect
+}
+
 var setChan chan cacheReqResp
 var updateChan chan cacheReqResp
 
@@ -187,12 +198,12 @@ func Set(req *http.Request, resp *http.Response, stats stopWatches) {
 	}
 
 	// we ONLY cache some requests
-	if resp.StatusCode < 200 || resp.StatusCode > 399 {
-		logStatus = "UC_RESPCODE"
-		return
-	}
 	if req.Method != "GET" {
 		logStatus = "UC_METHOD"
+		return
+	}
+	if !contains(cacheableStatusCodes[:], resp.StatusCode) {
+		logStatus = "UC_RESPCODE"
 		return
 	}
 	if req.Header.Get("Authorization") != "" || strings.TrimSpace(req.Header.Get("Vary")) == "*" {

@@ -115,6 +115,15 @@ func MapElemToI(m map[string]string, key string) (val int, noerr bool) {
 	return v, true
 }
 
+func contains(arr []int, val int) bool {
+	for _, v := range arr {
+		if v == val {
+			return true
+		}
+	}
+	return false
+}
+
 func limitStr(s string, limit int) string {
 	return s[:int(math.Min(float64(len(s)), float64(limit)))]
 }
