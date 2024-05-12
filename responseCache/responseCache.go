@@ -30,23 +30,24 @@ func Init() {
 	}
 
 	// initialize logging worker
-	logChan = make(chan string, config.Workers.LogBufferSize)
-	if config.Workers.LogNumWorkers < 1 {
-		config.Workers.LogNumWorkers = 1
-	}
-	for i := 0; i < config.Workers.LogNumWorkers; i++ {
-		go cacheLogWorker()
-	}
+	logChan = make(chan string, config.Log.LogBufferSize)
+	go cacheLogWorker()
 
 	redisInit()
 
 	bumpInit()
 
 	// init prioworkers
-	prioworkers.Init(config.Workers.CacheSetNumWorkers + config.Workers.CacheUpdateNumWorkers)
+	if config.Workers.PrioritiesEnabled {
+		prioworkers.Init(config.Workers.WorkerBufferSize, &prioworkers.PrioworkersOptions{
+			MaxBlockedWorkers:        config.Workers.WorkerBufferSize,
+			LowPrioSpinCnt:           max(config.Workers.CacheSetNumWorkers, config.Workers.CacheUpdateNumWorkers),
+			EnforceSpinCntOnHighPrio: false,
+		})
+	}
 
 	// spin up cache set workers
-	setChan = make(chan cacheReqResp, config.Workers.CacheSetBufferSize)
+	setChan = make(chan cacheReqResp, config.Workers.WorkerBufferSize)
 	if config.Workers.CacheSetNumWorkers < 1 {
 		config.Workers.CacheSetNumWorkers = 1
 	}
@@ -56,7 +57,7 @@ func Init() {
 	}
 
 	// spin up cache update workers
-	updateChan = make(chan cacheReqResp, config.Workers.CacheUpdateBufferSize)
+	updateChan = make(chan cacheReqResp, config.Workers.WorkerBufferSize)
 	if config.Workers.CacheUpdateNumWorkers < 1 {
 		config.Workers.CacheUpdateNumWorkers = 1
 	}

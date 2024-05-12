@@ -70,8 +70,10 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats stopWatche
 	stats.getSw = stopwatch.Start()
 	defer stats.getSw.Stop()
 
-	workerId := prioworkers.WorkStart(mainPrio)
-	defer prioworkers.WorkEnd(workerId)
+	if config.Workers.PrioritiesEnabled {
+		workerId := prioworkers.WorkStart(mainPrio)
+		defer prioworkers.WorkEnd(workerId)
+	}
 
 	cacheKey = getKey(req, "")
 
@@ -181,8 +183,10 @@ func Set(req *http.Request, resp *http.Response, stats stopWatches) {
 	stats.setSw = stopwatch.Start()
 	defer stats.setSw.Stop()
 
-	workerId := prioworkers.WorkStart(mainPrio)
-	defer prioworkers.WorkEnd(workerId)
+	if config.Workers.PrioritiesEnabled {
+		workerId := prioworkers.WorkStart(mainPrio)
+		defer prioworkers.WorkEnd(workerId)
+	}
 
 	// if it's a nobump domain we should not cache it
 	if MapHasKey(noBumpDomains, req.Host) {
@@ -290,11 +294,13 @@ func setWorker(redisConn *redis.Client) {
 	workerId := -1
 	for {
 
-		if workerId >= 0 {
+		if config.Workers.PrioritiesEnabled && workerId >= 0 {
 			prioworkers.WorkEnd(workerId)
 		}
 		msg := <-setChan
-		workerId = prioworkers.WorkStart(setWPrio)
+		if config.Workers.PrioritiesEnabled {
+			workerId = prioworkers.WorkStart(setWPrio)
+		}
 
 		cacheObj := &msg.cacheObj
 		req := &msg.req
@@ -339,11 +345,13 @@ func setWorker(redisConn *redis.Client) {
 func updateTtlWorker(redisConn *redis.Client) {
 	workerId := -1
 	for {
-		if workerId >= 0 {
+		if config.Workers.PrioritiesEnabled && workerId >= 0 {
 			prioworkers.WorkEnd(workerId)
 		}
 		msg := <-updateChan
-		workerId = prioworkers.WorkStart(updateWPrio)
+		if config.Workers.PrioritiesEnabled {
+			workerId = prioworkers.WorkStart(updateWPrio)
+		}
 		req := &msg.req
 		respHeaders := &msg.cacheObj.Headers
 		if respHeaders.Get("Date") == "" {
@@ -374,7 +382,11 @@ func getMaxAge(cacheControl map[string]string, respHeaders *http.Header) int {
 	maxAge = 0
 	if MapHasKey(cacheControl, "immutable") {
 		maxAge = config.Cache.MaxAge
-	} else if !MapHasKey(cacheControl, "max-age") && !MapHasKey(cacheControl, "s-maxage") {
+	} else if MapHasKey(cacheControl, "max-age") || MapHasKey(cacheControl, "s-maxage") {
+		maxAge, _ = MapElemToI(cacheControl, "max-age")
+		smaxAge, _ := MapElemToI(cacheControl, "s-maxage")
+		maxAge = int(math.Max(float64(maxAge), float64(smaxAge)))
+	} else {
 		if !config.Cache.OverrideExpire {
 			if expires := respHeaders.Get("Expires"); expires != "" {
 				tExpires, err := time.Parse(time.RFC1123, expires)
@@ -391,14 +403,10 @@ func getMaxAge(cacheControl map[string]string, respHeaders *http.Header) int {
 				}
 			}
 		}
-	} else {
-		maxAge, _ = MapElemToI(cacheControl, "max-age")
-		smaxAge, _ := MapElemToI(cacheControl, "s-maxage")
-		maxAge = int(math.Max(float64(maxAge), float64(smaxAge)))
 	}
 	age, ageErr := strconv.Atoi(respHeaders.Get("Age"))
 	if ageErr == nil {
-		if maxAge > age { // this is NOT according to standard !!! but some servers send responses which are extensively stale - if it's good for them it should be good for us
+		if maxAge > age { // this is NOT according to standard !!! but some servers send responses which are extensively stale - if response is good for them it should be good for us
 			maxAge = maxAge - age
 		}
 	}
