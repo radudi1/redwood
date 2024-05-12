@@ -30,16 +30,15 @@ type CacheConfig struct {
 }
 
 type LogConfig struct {
-	LogFile string
+	LogFile       string
+	LogBufferSize int
 }
 
 type WorkersConfig struct {
-	LogNumWorkers         int
-	LogBufferSize         int
 	CacheSetNumWorkers    int
-	CacheSetBufferSize    int
 	CacheUpdateNumWorkers int
-	CacheUpdateBufferSize int
+	WorkerBufferSize      int
+	PrioritiesEnabled     bool
 }
 
 type Config struct {

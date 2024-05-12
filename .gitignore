@@ -1,3 +1,4 @@
 redwood
 *.exe
 .*
+*.log

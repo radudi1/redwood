@@ -1,23 +1,32 @@
 [Redis]
 
+# Redis url to connect to - this is where cache will be saved
 Url = "redis://redishost:6379"
+
+# Redis DB number
 DBNum = 0
-# !!! make sure you have enough connections for workers too !!! this should be set to numWorkers (ALL) + how many connections you need for main process
-NumConn = 1024
+
+# Number of parallel connections to Redis
+NumConn = 256
 
 
 [Cache]
 
 # If http response allows longer caching it will be capped to this many seconds.
-MaxAge = 86400
+MaxAge = 604800
+
 # If response is larger than this many bytes it will not be cached
 MaxSize = 33554432
+
 # If don't have specific caching indications (eg: cache-control) we set expiration time to Age ("last-modified" header) / AgeDivisor
-AgeDivisor = 4
+AgeDivisor = 10
+
 # If set to true than "Expires" header is ignored
 # !!! WARNING !!! THIS VIOLATES STANDARDS
 OverrideExpire = false
-# For some mimetypes (eg: video) we can set lower caching ttl. RestrictedMimePrefixes is an array of these mimetypes and RestrictedMaxAge is the maximum cache time in seconds
+
+# For some mimetypes (eg: video) we can set lower caching ttl.
+# RestrictedMimePrefixes is an array of these mimetypes and RestrictedMaxAge is the maximum cache time in seconds
 RestrictedMaxAge = 3600
 RestrictedMimePrefixes = [ "video/" ]
 
@@ -33,22 +42,26 @@ DeflateLevel = 1
 # responseCache has it's own log
 LogFile = "/var/log/redwood/responseCache.log"
 
+# Logging messages are buffered. If you set a buffer that is too small processing threads will block waiting for the logging threads to finish
+LogBufferSize = 4096
+
 
 [Workers]
 
-# Logging is done in separate threads. LogNumWorkers is how many threads we spin up for logging.
-# Too many threads will just take up resources. Too few threads might block main processing of requests because of inter-thread communication
-LogNumWorkers = 1
-# Logging messages are buffered. If you set a buffer that is too small processing threads will block waiting for the logging threads to finish
-LogBufferSize = 4096
 # The actual writing to cache is done in this many threads
 CacheSetNumWorkers = 1
-# Communication from main processing to cache writing threads is buffered.
-# Choose a big enough buffer so that main processing is not blocked by cache writing threads
-CacheSetBufferSize = 32768
+
 # When an already cached item is fetched from cache we update (increase) the cache ttl
 # This is done with this many threads
 CacheUpdateNumWorkers = 1
-# Communication from main processing to updating threads is buffered.
-# Choose a big enough buffer so that main processing is not blocked by updating threads
-CacheUpdateBufferSize = 32768
+
+# Communication from main processing to cache writing threads is buffered.
+# Choose a big enough buffer so that main processing is not blocked by cache writing threads
+WorkerBufferSize = 32768
+
+# Writing threads are priorised lower than client threads (http requests)
+# This should slightly improve response time to client because cache writing is done in background only when no more clients are waiting for results
+# But if you have a very busy server with no idle times (there's always at least one client waiting for response)
+# then priorities don't make sends. In this scenario it will eventually behave like no priorities at all but with increased delay and overhead
+# Therefore this setting disables priorities and all workers (http clients or cache writers) are given equal opportunity
+PrioritiesEnabled = false
