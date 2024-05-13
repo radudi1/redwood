@@ -24,7 +24,6 @@ type CacheConfig struct {
 	GZIPLevel              int
 	DeflateLevel           int
 	AgeDivisor             int
-	OverrideExpire         bool
 	RestrictedMaxAge       int
 	RestrictedMimePrefixes []string
 }
@@ -41,11 +40,20 @@ type WorkersConfig struct {
 	PrioritiesEnabled     bool
 }
 
+type StandardViolationsConfig struct {
+	EnableStandardViolations   bool
+	OverrideSMaxAge            bool
+	OverrideExpire             bool
+	OverrideCacheControl       bool
+	OverrideCacheControlMaxAge int
+}
+
 type Config struct {
-	Redis   *RedisConfig
-	Cache   *CacheConfig
-	Log     *LogConfig
-	Workers *WorkersConfig
+	Redis              *RedisConfig
+	Cache              *CacheConfig
+	Log                *LogConfig
+	Workers            *WorkersConfig
+	StandardViolations *StandardViolationsConfig
 }
 
 var config Config

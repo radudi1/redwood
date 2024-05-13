@@ -21,10 +21,6 @@ MaxSize = 33554432
 # If don't have specific caching indications (eg: cache-control) we set expiration time to Age ("last-modified" header) / AgeDivisor
 AgeDivisor = 10
 
-# If set to true than "Expires" header is ignored
-# !!! WARNING !!! THIS VIOLATES STANDARDS
-OverrideExpire = false
-
 # For some mimetypes (eg: video) we can set lower caching ttl.
 # RestrictedMimePrefixes is an array of these mimetypes and RestrictedMaxAge is the maximum cache time in seconds
 RestrictedMaxAge = 3600
@@ -65,3 +61,32 @@ WorkerBufferSize = 32768
 # then priorities don't make sends. In this scenario it will eventually behave like no priorities at all but with increased delay and overhead
 # Therefore this setting disables priorities and all workers (http clients or cache writers) are given equal opportunity
 PrioritiesEnabled = false
+
+
+# All settings in StandardViolations violate http standards for improved cacheability
+# !!! Do NOT use them unless you know what you're doing !!!
+# !!! Things could break horribly !!!
+# None of the settings will be applied if EnableStandardViolations is set to false
+[StandardViolations]
+
+# This is a kill-switch for all settings in StandardViolations section
+# If disabled none of the other settings will be in effect (regardless of their value)
+# If enabled it will already enable some minor standard violations which should be more or less safe
+EnableStandardViolations = false
+
+# According to standard s-maxage specifically sets intermediate cache ttls (redwood)
+# But often times this is set too low compared to maxage
+# If OverrideSMaxAge is set to true than cache ttl will be set to the maximum of s-maxage and maxage
+OverrideSMaxAge = false
+
+# If set to true then "Expires" header is ignored and cache ttl will be computed from last-modified / AgeDivisor
+OverrideExpire = false
+
+# Cache-control maxage headers can be ignored if OverrideCacheControl is set to true
+# In this situation the algorithm works like this:
+# We compute time since last-modified divided by AgeDivisor and we cap it to OverrideCacheControlMaxAve
+# We get max-age from cache-control
+# We set the ttl to be the maximum of the 2 values
+# If set to true it's behavior implies OverrideExpire set to true as well
+OverrideCacheControl = false
+OverrideCacheControlMaxAge = 86400

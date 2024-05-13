@@ -214,7 +214,6 @@ func Set(req *http.Request, resp *http.Response, stats stopWatches) {
 		logStatus = "UC_AUTHVARY"
 		return
 	}
-	log.Println(resp.Header.Values("Cache-Control"))
 	cacheControl := splitHeader(&resp.Header, "Cache-Control", ",")
 	if MapHasKey(cacheControl, "private") || MapHasKey(cacheControl, "no-cache") || MapHasKey(cacheControl, "no-store") {
 		logStatus = "UC_CACHECTRL"
@@ -241,8 +240,8 @@ func Set(req *http.Request, resp *http.Response, stats stopWatches) {
 	}
 
 	// Compute cache TTL from response
-	maxAge := getMaxAge(cacheControl, &resp.Header)
-	if maxAge < 1 {
+	maxAge, err := getMaxAge(cacheControl, &resp.Header)
+	if err != nil {
 		logStatus = "UC_STALE"
 		return
 	}
@@ -358,8 +357,8 @@ func updateTtlWorker(redisConn *redis.Client) {
 			return
 		}
 		cacheControl := splitHeader(respHeaders, "Cache-Control", ",")
-		maxAge := getMaxAge(cacheControl, respHeaders)
-		if maxAge < 1 {
+		maxAge, err := getMaxAge(cacheControl, respHeaders)
+		if err != nil {
 			return
 		}
 		cacheKey := getKey(req, "")
@@ -377,53 +376,6 @@ func updateTtlWorker(redisConn *redis.Client) {
 	}
 }
 
-func getMaxAge(cacheControl map[string]string, respHeaders *http.Header) int {
-	var maxAge int
-	maxAge = 0
-	if MapHasKey(cacheControl, "immutable") {
-		maxAge = config.Cache.MaxAge
-	} else if MapHasKey(cacheControl, "max-age") || MapHasKey(cacheControl, "s-maxage") {
-		maxAge, _ = MapElemToI(cacheControl, "max-age")
-		smaxAge, _ := MapElemToI(cacheControl, "s-maxage")
-		maxAge = int(math.Max(float64(maxAge), float64(smaxAge)))
-	} else {
-		if !config.Cache.OverrideExpire {
-			if expires := respHeaders.Get("Expires"); expires != "" {
-				tExpires, err := time.Parse(time.RFC1123, expires)
-				if err == nil {
-					maxAge = int(tExpires.Sub(time.Now()).Seconds())
-				}
-			}
-		}
-		if maxAge == 0 && config.Cache.AgeDivisor != 0 {
-			if lastModified := respHeaders.Get("Last-Modified"); lastModified != "" {
-				tLastModified, err := time.Parse(time.RFC1123, lastModified)
-				if err == nil {
-					maxAge = int(float64(time.Since(tLastModified).Seconds()) / float64(config.Cache.AgeDivisor))
-				}
-			}
-		}
-	}
-	age, ageErr := strconv.Atoi(respHeaders.Get("Age"))
-	if ageErr == nil {
-		if maxAge > age { // this is NOT according to standard !!! but some servers send responses which are extensively stale - if response is good for them it should be good for us
-			maxAge = maxAge - age
-		}
-	}
-	tDate, err := time.Parse(time.RFC1123, respHeaders.Get("Date"))
-	if err == nil {
-		maxAge = maxAge - int(time.Since(tDate).Seconds())
-	}
-	for _, v := range config.Cache.RestrictedMimePrefixes {
-		if strings.HasPrefix(respHeaders.Get("Content-Type"), v) {
-			maxAge = int(math.Min(float64(maxAge), float64(config.Cache.RestrictedMaxAge)))
-			break
-		}
-	}
-	maxAge = int(math.Min(float64(maxAge), float64(config.Cache.MaxAge)))
-	return maxAge
-}
-
 func sendHeaders(w http.ResponseWriter, statusCode int, respHeaders http.Header, cacheStatus string, cacheKey string, req *http.Request, stats stopWatches) {
 	for k, v := range respHeaders {
 		w.Header().Set(k, strings.Join(v, " "))
@@ -433,4 +385,105 @@ func sendHeaders(w http.ResponseWriter, statusCode int, respHeaders http.Header,
 		cacheLog(req, statusCode, respHeaders, cacheStatus, cacheKey, stats)
 	}
 	updateChan <- cacheReqResp{cacheObj: cacheObj{Headers: respHeaders.Clone()}, req: *req}
+}
+
+func getMaxAge(cacheControl map[string]string, respHeaders *http.Header) (int, error) {
+	if MapHasKey(cacheControl, "immutable") {
+		return validateMaxAge(config.Cache.MaxAge, respHeaders)
+	}
+	// if standard violation is enabled use this algorithm
+	if config.StandardViolations.EnableStandardViolations {
+		maxAge := max(getCacheControlTtl(cacheControl, respHeaders), getLastModifiedTtl(respHeaders))
+		if config.StandardViolations.OverrideCacheControl {
+			return validateMaxAge(max(maxAge, min(getLastModifiedTtl(respHeaders)), config.StandardViolations.OverrideCacheControlMaxAge), respHeaders)
+		}
+		if maxAge > 0 {
+			return validateMaxAge(maxAge, respHeaders)
+		}
+		if !config.StandardViolations.OverrideExpire {
+			if maxAge = getExpiresTtl(respHeaders); maxAge > 0 {
+				return validateMaxAge(maxAge, respHeaders)
+			}
+		}
+		return validateMaxAge(getLastModifiedTtl(respHeaders), respHeaders)
+	} else { // standard violations are not enabled
+		// return from cache-control if possible
+		if maxAge := getCacheControlTtl(cacheControl, respHeaders); maxAge > 0 {
+			return validateMaxAge(maxAge, respHeaders)
+		}
+		if maxAge := getExpiresTtl(respHeaders); maxAge > 0 {
+			return validateMaxAge(maxAge, respHeaders)
+		}
+		// otherwise return from last-modified
+		return validateMaxAge(getLastModifiedTtl(respHeaders), respHeaders)
+	}
+}
+
+func validateMaxAge(maxAge int, respHeaders *http.Header) (int, error) {
+	// this is needed in case we need to update ttl of a previously set cache object
+	tDate, err := time.Parse(time.RFC1123, respHeaders.Get("Date"))
+	if err == nil {
+		maxAge = maxAge - int(time.Since(tDate).Seconds())
+	}
+	// if we have a restricted mime prefix we cap maxAge accordingly
+	for _, v := range config.Cache.RestrictedMimePrefixes {
+		if strings.HasPrefix(respHeaders.Get("Content-Type"), v) {
+			maxAge = min(maxAge, config.Cache.RestrictedMaxAge)
+			break
+		}
+	}
+	// make sure maxAge is within range
+	if maxAge < 1 {
+		return maxAge, fmt.Errorf("invalid maxAge value")
+	}
+	// cap maxAge to config setting
+	maxAge = min(maxAge, config.Cache.MaxAge)
+	return maxAge, nil
+}
+
+func getCacheControlTtl(cacheControl map[string]string, headers *http.Header) int {
+	smaxAge, _ := MapElemToI(cacheControl, "s-maxage")
+	// if we have s-maxage and s-maxage overriding is not enabled we return it
+	if smaxAge > 0 && (!config.StandardViolations.EnableStandardViolations || !config.StandardViolations.OverrideSMaxAge) {
+		return smaxAge - getAge(headers)
+	}
+	// s-maxage is not present or it's overriden so we fetch maxage and return maximum of the 2 values minus age
+	maxAge, _ := MapElemToI(cacheControl, "max-age")
+	ttl := max(maxAge, smaxAge)
+	age := getAge(headers)
+	if config.StandardViolations.EnableStandardViolations && ttl-age < 0 { // this is NOT according to standard !!! but some servers send responses which are extensively stale - if response is good for them it should be good for us
+		return ttl
+	}
+	return ttl - age
+}
+
+func getExpiresTtl(headers *http.Header) int {
+	if expires := headers.Get("Expires"); expires != "" {
+		tExpires, err := time.Parse(time.RFC1123, expires)
+		if err == nil {
+			return int(tExpires.Sub(time.Now()).Seconds())
+		}
+	}
+	return 0
+}
+
+func getLastModifiedTtl(headers *http.Header) int {
+	if config.Cache.AgeDivisor < 1 { // if we don't have a valid AgeDivisor we can't compute ttl based on last-modified
+		return 0
+	}
+	if lastModified := headers.Get("Last-Modified"); lastModified != "" {
+		tLastModified, err := time.Parse(time.RFC1123, lastModified)
+		if err == nil {
+			return int(float64(time.Since(tLastModified).Seconds()) / float64(config.Cache.AgeDivisor))
+		}
+	}
+	return 0
+}
+
+func getAge(headers *http.Header) int {
+	age, ageErr := strconv.Atoi(headers.Get("Age"))
+	if ageErr == nil {
+		return age
+	}
+	return 0
 }
