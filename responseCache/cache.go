@@ -17,7 +17,11 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-type cacheObj struct {
+type stopWatches struct {
+	getSw, setSw stopwatch.StopWatch
+}
+
+type cacheObjType struct {
 	Host       string
 	Url        string
 	StatusCode int
@@ -26,14 +30,10 @@ type cacheObj struct {
 }
 
 type cacheReqResp struct {
-	cacheObj cacheObj
+	cacheObj cacheObjType
 	req      http.Request
 	maxAge   int
 	stats    stopWatches
-}
-
-type stopWatches struct {
-	getSw, setSw stopwatch.StopWatch
 }
 
 // cacheable http response codes
@@ -49,6 +49,9 @@ var cacheableStatusCodes = [...]int{
 
 var setChan chan cacheReqResp
 var updateChan chan cacheReqResp
+var revalidateChan chan http.Request
+
+// var revalidateChan chan
 
 func Get(w http.ResponseWriter, req *http.Request) (found bool, stats stopWatches) {
 
@@ -58,7 +61,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats stopWatche
 
 	found = false
 	statusCode := http.StatusInternalServerError
-	var cacheObj cacheObj
+	var cacheObj cacheObjType
 	var cacheStatus string
 	var cacheKey string
 	defer (func() {
@@ -96,7 +99,44 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats stopWatche
 		log.Println(serErr)
 		return
 	}
-	// if the client just wants validation we can already reply with valid because if it's cached we would have served it anyway as valid
+	// check if this is the real response or just the dummy one used for vary
+	if cacheObj.Headers.Get("Vary") != "" {
+		// we have a vary header so we fetch the real response according to vary
+		cacheKey = getKey(req, cacheObj.Headers.Get("Vary"))
+		cacheObjSer, redisErr := cacheConn().Get(ctx, cacheKey).Result()
+		if redisErr == redis.Nil {
+			return
+		}
+		serErr := msgpack.Unmarshal([]byte(cacheObjSer), &cacheObj)
+		if serErr != nil {
+			log.Println(serErr)
+			return
+		}
+	}
+
+	// check if cached object is stale and decide what to do if it is
+	respCacheControl := splitHeader(&cacheObj.Headers, "Cache-Control", ",")
+	respMaxAge, maxAgeErr := getMaxAge(respCacheControl, &cacheObj.Headers, false)
+	isStale := maxAgeErr != nil || respMaxAge < getResponseAge(&cacheObj.Headers)
+	// check if ServeStale is enabled and act accordingly
+	if !config.StandardViolations.EnableStandardViolations || !config.StandardViolations.ServeStale {
+		if isStale || MapHasKey(respCacheControl, "must-revalidate") || MapHasKey(respCacheControl, "proxy-revalidate") {
+			return
+		}
+	} else { // ServeStale is enabled
+		if isStale {
+			revalidateChan <- *req.Clone(ctx)
+		}
+	}
+	// if it's a HEAD request or has certain response status codes we don't send the body  - RFCs 2616 7230
+	// https://stackoverflow.com/questions/78182848/does-http-differentiate-between-an-empty-body-and-no-body
+	if req.Method == "HEAD" || int(cacheObj.StatusCode/100) == 1 || cacheObj.StatusCode == 204 || cacheObj.StatusCode == 304 {
+		found = true
+		statusCode = cacheObj.StatusCode
+		cacheStatus = "HIT"
+		return
+	}
+	// if the client just wants validation we can already reply with valid
 	if oldETag := req.Header.Get("If-None-Match"); oldETag != "" {
 		if oldETag == cacheObj.Headers.Get("ETag") {
 			cacheObj.Headers.Add("X-Cache", "NOTMODIF")
@@ -112,28 +152,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats stopWatche
 		cacheStatus = "NOTMODIF"
 		return
 	}
-	// check if this is the real response or just the dummy one used for vary
-	if cacheObj.Headers.Get("Vary") != "" {
-		// we have a vary header so we fetch the real response according to vary
-		cacheKey = getKey(req, cacheObj.Headers.Get("Vary"))
-		cacheObjSer, redisErr := cacheConn().Get(ctx, cacheKey).Result()
-		if redisErr == redis.Nil {
-			return
-		}
-		serErr := msgpack.Unmarshal([]byte(cacheObjSer), &cacheObj)
-		if serErr != nil {
-			log.Println(serErr)
-			return
-		}
-	}
-	// if it's a HEAD request or has certain response status codes we don't send the body  - RFCs 2616 7230
-	// https://stackoverflow.com/questions/78182848/does-http-differentiate-between-an-empty-body-and-no-body
-	if req.Method == "HEAD" || int(cacheObj.StatusCode/100) == 1 || cacheObj.StatusCode == 204 || cacheObj.StatusCode == 304 {
-		found = true
-		statusCode = cacheObj.StatusCode
-		cacheStatus = "HIT"
-		return
-	}
+
 	// check if body needs reencoding (compression algo not supported by client)
 	respEncoding := cacheObj.Headers.Get("Content-Encoding")
 	if respEncoding != "" {
@@ -240,7 +259,7 @@ func Set(req *http.Request, resp *http.Response, stats stopWatches) {
 	}
 
 	// Compute cache TTL from response
-	maxAge, err := getMaxAge(cacheControl, &resp.Header)
+	maxAge, err := getMaxAge(cacheControl, &resp.Header, config.StandardViolations.EnableStandardViolations)
 	if err != nil {
 		logStatus = "UC_STALE"
 		return
@@ -275,7 +294,7 @@ func Set(req *http.Request, resp *http.Response, stats stopWatches) {
 	}
 
 	// try to cache
-	cacheObj := cacheObj{
+	cacheObj := cacheObjType{
 		Host:       req.Host,
 		Url:        req.RequestURI,
 		StatusCode: resp.StatusCode,
@@ -283,7 +302,7 @@ func Set(req *http.Request, resp *http.Response, stats stopWatches) {
 		Body:       body,
 	}
 
-	setChan <- cacheReqResp{cacheObj: cacheObj, req: *req, maxAge: maxAge}
+	setChan <- cacheReqResp{cacheObj: cacheObj, req: *req.Clone(ctx), maxAge: maxAge}
 
 	logStatus = "MISS"
 
@@ -354,12 +373,12 @@ func updateTtlWorker(redisConn *redis.Client) {
 		req := &msg.req
 		respHeaders := &msg.cacheObj.Headers
 		if respHeaders.Get("Date") == "" {
-			return
+			continue
 		}
 		cacheControl := splitHeader(respHeaders, "Cache-Control", ",")
-		maxAge, err := getMaxAge(cacheControl, respHeaders)
+		maxAge, err := getMaxAge(cacheControl, respHeaders, config.StandardViolations.EnableStandardViolations)
 		if err != nil {
-			return
+			continue
 		}
 		cacheKey := getKey(req, "")
 		redisErr := redisConn.Expire(ctx, cacheKey, time.Duration(maxAge)*time.Second).Err()
@@ -376,6 +395,28 @@ func updateTtlWorker(redisConn *redis.Client) {
 	}
 }
 
+func revalidateWorker() {
+	workerId := -1
+	for {
+		if config.Workers.PrioritiesEnabled && workerId >= 0 {
+			prioworkers.WorkEnd(workerId)
+		}
+		req := <-revalidateChan
+		if config.Workers.PrioritiesEnabled {
+			workerId = prioworkers.WorkStart(revalidateWPrio)
+		}
+		httpClient := &http.Client{}
+		httpClient.Timeout = 30 * time.Second
+		resp, err := httpClient.Do(&req)
+		if err != nil {
+			log.Println("Error making HTTP request:", err)
+			continue
+		}
+		Set(&req, resp, stopWatches{})
+		resp.Body.Close()
+	}
+}
+
 func sendHeaders(w http.ResponseWriter, statusCode int, respHeaders http.Header, cacheStatus string, cacheKey string, req *http.Request, stats stopWatches) {
 	for k, v := range respHeaders {
 		w.Header().Set(k, strings.Join(v, " "))
@@ -384,15 +425,15 @@ func sendHeaders(w http.ResponseWriter, statusCode int, respHeaders http.Header,
 	if req != nil {
 		cacheLog(req, statusCode, respHeaders, cacheStatus, cacheKey, stats)
 	}
-	updateChan <- cacheReqResp{cacheObj: cacheObj{Headers: respHeaders.Clone()}, req: *req}
+	updateChan <- cacheReqResp{cacheObj: cacheObjType{Headers: respHeaders.Clone()}, req: *req}
 }
 
-func getMaxAge(cacheControl map[string]string, respHeaders *http.Header) (int, error) {
+func getMaxAge(cacheControl map[string]string, respHeaders *http.Header, withViolations bool) (int, error) {
 	if MapHasKey(cacheControl, "immutable") {
 		return validateMaxAge(config.Cache.MaxAge, respHeaders)
 	}
 	// if standard violation is enabled use this algorithm
-	if config.StandardViolations.EnableStandardViolations {
+	if withViolations {
 		maxAge := max(getCacheControlTtl(cacheControl, respHeaders), getLastModifiedTtl(respHeaders))
 		if config.StandardViolations.OverrideCacheControl {
 			return validateMaxAge(max(maxAge, min(getLastModifiedTtl(respHeaders)), config.StandardViolations.OverrideCacheControlMaxAge), respHeaders)
@@ -421,10 +462,7 @@ func getMaxAge(cacheControl map[string]string, respHeaders *http.Header) (int, e
 
 func validateMaxAge(maxAge int, respHeaders *http.Header) (int, error) {
 	// this is needed in case we need to update ttl of a previously set cache object
-	tDate, err := time.Parse(time.RFC1123, respHeaders.Get("Date"))
-	if err == nil {
-		maxAge = maxAge - int(time.Since(tDate).Seconds())
-	}
+	maxAge = maxAge - getResponseAge(respHeaders)
 	// if we have a restricted mime prefix we cap maxAge accordingly
 	for _, v := range config.Cache.RestrictedMimePrefixes {
 		if strings.HasPrefix(respHeaders.Get("Content-Type"), v) {
@@ -486,4 +524,12 @@ func getAge(headers *http.Header) int {
 		return age
 	}
 	return 0
+}
+
+func getResponseAge(headers *http.Header) int {
+	tDate, err := time.Parse(time.RFC1123, headers.Get("Date"))
+	if err != nil {
+		return 0
+	}
+	return int(time.Since(tDate).Seconds())
 }

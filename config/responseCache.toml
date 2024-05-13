@@ -74,6 +74,13 @@ PrioritiesEnabled = false
 # If enabled it will already enable some minor standard violations which should be more or less safe
 EnableStandardViolations = false
 
+# If ServeStale is set to true then stale responses will be served from cache
+# and the original request will be revalidated in background from the origin http server
+# Revalidation is done by separate workers. Their number is set by RevalidateNumWorkers
+ServerStale = false
+RevalidateNumWorkers = 16
+
+
 # According to standard s-maxage specifically sets intermediate cache ttls (redwood)
 # But often times this is set too low compared to maxage
 # If OverrideSMaxAge is set to true than cache ttl will be set to the maximum of s-maxage and maxage

@@ -42,6 +42,8 @@ type WorkersConfig struct {
 
 type StandardViolationsConfig struct {
 	EnableStandardViolations   bool
+	ServeStale                 bool
+	RevalidateNumWorkers       int
 	OverrideSMaxAge            bool
 	OverrideExpire             bool
 	OverrideCacheControl       bool
