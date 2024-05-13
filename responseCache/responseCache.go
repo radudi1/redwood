@@ -16,6 +16,7 @@ import (
 // worker priorities -- priorities are from 0 to 99 - 99 is the highest priority
 const mainPrio = 90
 const setWPrio = 50
+const revalidateWPrio = 40
 const updateWPrio = 20
 
 var logChan chan string
@@ -64,6 +65,17 @@ func Init() {
 	for i := 0; i < config.Workers.CacheUpdateNumWorkers; i++ {
 		config.Redis.NumConn--
 		go updateTtlWorker(redisConnArr[config.Redis.NumConn])
+	}
+
+	// spin up revalidate workers
+	if config.StandardViolations.EnableStandardViolations && config.StandardViolations.ServeStale {
+		revalidateChan = make(chan http.Request, config.Workers.WorkerBufferSize)
+		if config.StandardViolations.RevalidateNumWorkers < 1 {
+			config.StandardViolations.RevalidateNumWorkers = 1
+		}
+		for i := 0; i < config.StandardViolations.RevalidateNumWorkers; i++ {
+			go revalidateWorker()
+		}
 	}
 
 	// initialize other stuff
