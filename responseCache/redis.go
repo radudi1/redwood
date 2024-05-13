@@ -23,7 +23,7 @@ func redisInit() {
 		config.Redis.NumConn = config.Workers.CacheSetNumWorkers + config.Workers.CacheUpdateNumWorkers + 1
 	}
 	redisConnArr = make([]*redis.Client, config.Redis.NumConn)
-	for k, _ := range redisConnArr {
+	for k := range redisConnArr {
 		conn := cacheOpen()
 		if conn == nil {
 			log.Panicln("!!! ERROR !!! COULD NOT CONNECT TO REDIS - responseCache IS DISABLED")
