@@ -20,6 +20,7 @@ const revalidateWPrio = 40
 const updateWPrio = 20
 
 var logChan chan string
+var revalidateLogChan chan string
 
 func Init() {
 
@@ -30,9 +31,11 @@ func Init() {
 		return
 	}
 
-	// initialize logging worker
+	// initialize logging workers
 	logChan = make(chan string, config.Log.LogBufferSize)
 	go cacheLogWorker(config.Log.LogFile, logChan)
+	revalidateLogChan = make(chan string, config.Log.LogBufferSize)
+	go cacheLogWorker(config.Log.RevalidateLogFile, revalidateLogChan)
 
 	redisInit()
 

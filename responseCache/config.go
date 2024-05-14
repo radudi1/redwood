@@ -29,8 +29,9 @@ type CacheConfig struct {
 }
 
 type LogConfig struct {
-	LogFile       string
-	LogBufferSize int
+	LogFile           string
+	RevalidateLogFile string
+	LogBufferSize     int
 }
 
 type WorkersConfig struct {

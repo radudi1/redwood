@@ -35,8 +35,11 @@ DeflateLevel = 1
 
 [Log]
 
-# responseCache has it's own log
+# ResponseCache has it's own log
 LogFile = "/var/log/redwood/responseCache.log"
+
+# Revalidation mechanism (if enabled) has it's own log file
+RevalidateLogFile = ""
 
 # Logging messages are buffered. If you set a buffer that is too small processing threads will block waiting for the logging threads to finish
 LogBufferSize = 4096
