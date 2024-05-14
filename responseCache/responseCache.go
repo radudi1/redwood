@@ -32,7 +32,7 @@ func Init() {
 
 	// initialize logging worker
 	logChan = make(chan string, config.Log.LogBufferSize)
-	go cacheLogWorker()
+	go cacheLogWorker(config.Log.LogFile, logChan)
 
 	redisInit()
 
@@ -104,23 +104,26 @@ func cacheLog(req *http.Request, statusCode int, respHeaders http.Header, cacheS
 	)
 }
 
-func cacheLogWorker() {
+func cacheLogWorker(filename string, logChan chan string) {
 	var logFile *os.File
-	if config.Log.LogFile != "" {
-		var err error
-		logFile, err = os.OpenFile(config.Log.LogFile, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
-		if err != nil {
-			log.Println(err)
-		} else {
-			defer logFile.Close()
-		}
+	if filename == "" {
+		log.Println("No filename given for ResponseCache log. Logging disabled")
 	}
-	for {
-		// read strings from the channel here and write them to the buffer
-		str := <-logChan
+	var err error
+	logFile, err = os.OpenFile(filename, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
+	if err != nil {
+		log.Println(err)
+		log.Println("ResponseCache logging to standard output")
+	} else {
+		defer logFile.Close()
+	}
+	for str := range logChan {
+		// read strings from the channel here and write them to file or stdout
+		logLine := fmt.Sprint(time.Now().Format("2006-01-02 15:04:05.000000"), " ", str)
 		if logFile != nil {
-			logLine := fmt.Sprint(time.Now().Format("2006-01-02 15:04:05.000000"), " ", str)
 			logFile.WriteString(logLine)
+		} else {
+			fmt.Print(logLine)
 		}
 	}
 }
