@@ -97,6 +97,7 @@ func cacheLog(req *http.Request, statusCode int, respHeaders http.Header, cacheS
 		respHeaders.Get("Content-Encoding"),
 		respHeaders.Get("Content-Length"),
 		strings.SplitN(respHeaders.Get("Content-Type"), ";", 2)[0],
+		strings.ReplaceAll(respHeaders.Get("Vary"), " ", ""),
 		strings.ReplaceAll(respHeaders.Get("Cache-Control"), " ", ""),
 		limitStr(req.URL.String(), 128),
 		stats.getSw.GetRunningDuration().Milliseconds(),
