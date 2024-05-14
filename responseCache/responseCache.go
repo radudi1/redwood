@@ -135,7 +135,7 @@ func cacheLogWorker(filename string, logChan chan string) {
 // os signal processing
 func signalHandler(c chan os.Signal) {
 	for range c {
-		log.Println("No-bump domains: ", noBumpDomains)
-		log.Printf("%+v\n", prioworkers.GetState())
+		fmt.Println("No-bump domains: ", noBumpDomains)
+		fmt.Printf("%+v\n", prioworkers.GetState())
 	}
 }
