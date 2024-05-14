@@ -412,6 +412,17 @@ func revalidateWorker() {
 			log.Println("Error making HTTP request:", err)
 			continue
 		}
+		revalidateLogChan <- fmt.Sprintln(
+			req.RemoteAddr,
+			resp.StatusCode,
+			req.Method,
+			resp.Header.Get("Content-Encoding"),
+			resp.Header.Get("Content-Length"),
+			strings.SplitN(resp.Header.Get("Content-Type"), ";", 2)[0],
+			strings.ReplaceAll(resp.Header.Get("Vary"), " ", ""),
+			strings.ReplaceAll(resp.Header.Get("Cache-Control"), " ", ""),
+			limitStr(req.URL.String(), 128),
+		)
 		Set(&req, resp, stopWatches{})
 		resp.Body.Close()
 	}
