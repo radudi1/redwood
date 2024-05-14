@@ -149,6 +149,8 @@ github.com/radudi1/prioworkers v0.0.0-20240423085029-c180a8bfc20e h1:BxtuET/rc0L
 github.com/radudi1/prioworkers v0.0.0-20240423085029-c180a8bfc20e/go.mod h1:x/WWvDKZnnOpiUVNTp1ja3nk/OXQ1Y+b+A2t2tApANE=
 github.com/radudi1/prioworkers v0.0.0-20240511143613-ce1b9da26768 h1:IzwKkOVsS0bQPQE42zOsLobM7sMkl+e7h/8/0fTJFrQ=
 github.com/radudi1/prioworkers v0.0.0-20240511143613-ce1b9da26768/go.mod h1:x/WWvDKZnnOpiUVNTp1ja3nk/OXQ1Y+b+A2t2tApANE=
+github.com/radudi1/prioworkers v0.0.0-20240514095643-af8945536d25 h1:HmvTRpEfpfaGONEEWlTf/dNueng4zeUHWFVAaOVELBo=
+github.com/radudi1/prioworkers v0.0.0-20240514095643-af8945536d25/go.mod h1:x/WWvDKZnnOpiUVNTp1ja3nk/OXQ1Y+b+A2t2tApANE=
 github.com/radudi1/stopwatch v0.0.0-20240427084450-6fb736cb06b1 h1:1yq0JKECz0vOLcH4dvcgbUSF8RCFTnU0uCDygi4JZBI=
 github.com/radudi1/stopwatch v0.0.0-20240427084450-6fb736cb06b1/go.mod h1:a9pGwhtCKxeB3fa5LIkfwNFVBg7lojlTZYlOJUHJe+w=
 github.com/redis/go-redis/v9 v9.5.1 h1:H1X4D3yHPaYrkL5X06Wh6xNVM/pX0Ft4RV0vMGvLBh8=

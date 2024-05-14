@@ -40,7 +40,7 @@ require (
 	github.com/google/pprof v0.0.0-20240424215950-a892ee059fd6 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.7 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/radudi1/prioworkers v0.0.0-20240511143613-ce1b9da26768
+	github.com/radudi1/prioworkers v0.0.0-20240514095643-af8945536d25
 	github.com/radudi1/stopwatch v0.0.0-20240427084450-6fb736cb06b1
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	golang.org/x/mod v0.17.0 // indirect
