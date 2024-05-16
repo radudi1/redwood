@@ -51,8 +51,6 @@ var setChan chan cacheReqResp
 var updateChan chan cacheReqResp
 var revalidateChan chan http.Request
 
-// var revalidateChan chan
-
 func Get(w http.ResponseWriter, req *http.Request) (found bool, stats stopWatches) {
 
 	if config.Redis.NumConn < 1 {
