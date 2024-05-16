@@ -43,9 +43,9 @@ func Init() {
 
 	// init prioworkers
 	if config.Workers.PrioritiesEnabled {
-		prioworkers.Init(config.Workers.WorkerBufferSize, &prioworkers.PrioworkersOptions{
-			MaxBlockedWorkers:        config.Workers.WorkerBufferSize,
-			LowPrioSpinCnt:           max(config.Workers.CacheSetNumWorkers, config.Workers.CacheUpdateNumWorkers),
+		prioworkers.Init(&prioworkers.PrioworkersOptions{
+			MaxBlockedWorkers:        int64(config.Workers.WorkerBufferSize),
+			LowPrioSpinCnt:           int64(max(config.Workers.CacheSetNumWorkers, config.Workers.CacheUpdateNumWorkers)),
 			EnforceSpinCntOnHighPrio: false,
 		})
 	}
