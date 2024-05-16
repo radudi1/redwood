@@ -309,7 +309,7 @@ func Set(req *http.Request, resp *http.Response, stats stopWatches) {
 }
 
 func setWorker(redisConn *redis.Client) {
-	workerId := -1
+	workerId := int64(-1)
 	for {
 
 		if config.Workers.PrioritiesEnabled && workerId >= 0 {
@@ -361,7 +361,7 @@ func setWorker(redisConn *redis.Client) {
 }
 
 func updateTtlWorker(redisConn *redis.Client) {
-	workerId := -1
+	workerId := int64(-1)
 	for {
 		if config.Workers.PrioritiesEnabled && workerId >= 0 {
 			prioworkers.WorkEnd(workerId)
@@ -396,7 +396,7 @@ func updateTtlWorker(redisConn *redis.Client) {
 }
 
 func revalidateWorker() {
-	workerId := -1
+	workerId := int64(-1)
 	for {
 		if config.Workers.PrioritiesEnabled && workerId >= 0 {
 			prioworkers.WorkEnd(workerId)
