@@ -136,6 +136,11 @@ func cacheLogWorker(filename string, logChan chan string) {
 func signalHandler(c chan os.Signal) {
 	for range c {
 		fmt.Println("No-bump domains: ", noBumpDomains)
+		fmt.Println("Log queue length: ", len(logChan))
+		fmt.Println("Revalidate log queue length: ", len(revalidateLogChan))
+		fmt.Println("Set queue length: ", len(setChan))
+		fmt.Println("Update queue length: ", len(updateChan))
+		fmt.Println("Revalidate queue length: ", len(revalidateChan))
 		fmt.Printf("%+v\n", prioworkers.GetState())
 	}
 }
