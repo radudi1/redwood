@@ -22,6 +22,7 @@ type Counters struct {
 	Hits          atomic.Uint64
 	Misses        atomic.Uint64
 	Uncacheable   atomic.Uint64
+	Sets          atomic.Uint64
 	Updates       atomic.Uint64
 	Revalidations atomic.Uint64
 	CacheErr      atomic.Uint64
@@ -394,6 +395,7 @@ func setWorker(redisConn *redis.Client) {
 			cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_CACHEERR", "", stats)
 			continue
 		}
+		counters.Sets.Add(1)
 
 	}
 }
