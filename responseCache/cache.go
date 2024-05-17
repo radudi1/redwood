@@ -19,17 +19,20 @@ import (
 )
 
 type Counters struct {
-	Hits          atomic.Uint64
-	Misses        atomic.Uint64
-	Uncacheable   atomic.Uint64
-	Sets          atomic.Uint64
-	Updates       atomic.Uint64
-	Revalidations atomic.Uint64
-	CacheErr      atomic.Uint64
-	SerErr        atomic.Uint64
-	EncodeErr     atomic.Uint64
-	ReadErr       atomic.Uint64
-	WriteErr      atomic.Uint64
+	Hits             atomic.Uint64
+	HitBytes         atomic.Uint64
+	Misses           atomic.Uint64
+	MissBytes        atomic.Uint64
+	Uncacheable      atomic.Uint64
+	UncacheableBytes atomic.Uint64
+	Sets             atomic.Uint64
+	Updates          atomic.Uint64
+	Revalidations    atomic.Uint64
+	CacheErr         atomic.Uint64
+	SerErr           atomic.Uint64
+	EncodeErr        atomic.Uint64
+	ReadErr          atomic.Uint64
+	WriteErr         atomic.Uint64
 }
 
 type stopWatches struct {
@@ -94,6 +97,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats stopWatche
 	defer (func() {
 		if found {
 			counters.Hits.Add(1)
+			counters.HitBytes.Add(uint64(len(cacheObj.Headers) + len(cacheObj.Body)))
 			if cacheStatus != "" {
 				sendHeaders(w, statusCode, cacheObj.Headers, cacheStatus, cacheKey, req, stats)
 			}
@@ -232,12 +236,19 @@ func Set(req *http.Request, resp *http.Response, stats stopWatches) {
 		defer prioworkers.WorkEnd(workerId)
 	}
 
+	var cacheObj *cacheObjType
+	contentLength := int64(-1)
+
 	// update counters when function returns
 	defer (func() {
 		if logStatus == "MISS" {
 			counters.Misses.Add(1)
+			counters.MissBytes.Add(uint64(len(cacheObj.Body)))
 		} else {
 			counters.Uncacheable.Add(1)
+			if contentLength > 0 {
+				counters.UncacheableBytes.Add(uint64(contentLength))
+			}
 		}
 	})()
 
@@ -280,7 +291,6 @@ func Set(req *http.Request, resp *http.Response, stats stopWatches) {
 	// }
 	sizeLimit := int(math.Min(float64(config.Cache.MaxSize), 512*1024*1024)) // redis max object size is 512 MB
 	contenLengthStr := strings.TrimSpace(req.Header.Get("Content-length"))
-	contentLength := int64(-1)
 	if contenLengthStr != "" {
 		n, err := strconv.ParseUint(contenLengthStr, 10, 63)
 		if err == nil {
@@ -329,7 +339,7 @@ func Set(req *http.Request, resp *http.Response, stats stopWatches) {
 	}
 
 	// try to cache
-	cacheObj := cacheObjType{
+	cacheObj = &cacheObjType{
 		Host:       req.Host,
 		Url:        req.RequestURI,
 		StatusCode: resp.StatusCode,
@@ -337,7 +347,7 @@ func Set(req *http.Request, resp *http.Response, stats stopWatches) {
 		Body:       body,
 	}
 
-	setChan <- cacheReqResp{cacheObj: cacheObj, req: *req.Clone(ctx), maxAge: maxAge}
+	setChan <- cacheReqResp{cacheObj: *cacheObj, req: *req.Clone(ctx), maxAge: maxAge}
 
 	logStatus = "MISS"
 

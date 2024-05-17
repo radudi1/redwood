@@ -135,23 +135,42 @@ func cacheLogWorker(filename string, logChan chan string) {
 // os signal processing
 func signalHandler(c chan os.Signal) {
 	for range c {
+		// nobump domains
 		fmt.Println("No-bump domains: ", noBumpDomains)
+		// channel queues
 		fmt.Println("Log queue length: ", len(logChan))
 		fmt.Println("Revalidate log queue length: ", len(revalidateLogChan))
 		fmt.Println("Set queue length: ", len(setChan))
 		fmt.Println("Update queue length: ", len(updateChan))
 		fmt.Println("Revalidate queue length: ", len(revalidateChan))
+		// prioworkers state
 		fmt.Printf("%+v\n", prioworkers.GetState())
+		// byte counters
+		fmt.Printf("Hit MB: %d\n", counters.HitBytes.Load()/1024/1024)
+		fmt.Printf("Miss MB: %d\n", counters.MissBytes.Load()/1024/1024)
+		fmt.Printf("Uncacheable MB: %d\n", counters.UncacheableBytes.Load()/1024/1024)
+		// request counters
 		fmt.Printf("Hits: %d\n", counters.Hits.Load())
 		fmt.Printf("Misses: %d\n", counters.Misses.Load())
 		fmt.Printf("Uncacheable: %d\n", counters.Uncacheable.Load())
 		fmt.Printf("Sets: %d\n", counters.Sets.Load())
 		fmt.Printf("Updates: %d\n", counters.Updates.Load())
 		fmt.Printf("Revalidations: %d\n", counters.Revalidations.Load())
+		// error counters
 		fmt.Printf("CacheErr: %d\n", counters.CacheErr.Load())
 		fmt.Printf("SerErr: %d\n", counters.SerErr.Load())
 		fmt.Printf("EncodeErr: %d\n", counters.EncodeErr.Load())
 		fmt.Printf("ReadErr: %d\n", counters.ReadErr.Load())
 		fmt.Printf("WriteErr: %d\n", counters.WriteErr.Load())
+		// ratios
+		if counters.Hits.Load()+counters.Misses.Load() == 0 { // prevent division by 0
+			continue
+		}
+		fmt.Printf("Uncacheable Ratio: %d%%\n", counters.Uncacheable.Load()*100/(counters.Hits.Load()+counters.Misses.Load()+counters.Uncacheable.Load()))
+		fmt.Printf("Uncacheable MB Ratio: %d%%\n", counters.UncacheableBytes.Load()*100/(counters.HitBytes.Load()+counters.MissBytes.Load()+counters.UncacheableBytes.Load()))
+		fmt.Printf("Cacheable Hit Ratio: %d%%\n", counters.Hits.Load()*100/(counters.Hits.Load()+counters.Misses.Load()))
+		fmt.Printf("Cacheable Hit MB Ratio: %d%%\n", counters.HitBytes.Load()*100/(counters.HitBytes.Load()+counters.MissBytes.Load()))
+		fmt.Printf("Total Hit Ratio: %d%%\n", counters.Hits.Load()*100/(counters.Hits.Load()+counters.Misses.Load()+counters.Uncacheable.Load()))
+		fmt.Printf("Total Hit MB Ratio: %d%%\n", counters.HitBytes.Load()*100/(counters.HitBytes.Load()+counters.MissBytes.Load()+counters.UncacheableBytes.Load()))
 	}
 }
