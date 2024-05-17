@@ -145,6 +145,7 @@ func signalHandler(c chan os.Signal) {
 		fmt.Printf("Hits: %d\n", counters.Hits.Load())
 		fmt.Printf("Misses: %d\n", counters.Misses.Load())
 		fmt.Printf("Uncacheable: %d\n", counters.Uncacheable.Load())
+		fmt.Printf("Sets: %d\n", counters.Sets.Load())
 		fmt.Printf("Updates: %d\n", counters.Updates.Load())
 		fmt.Printf("Revalidations: %d\n", counters.Revalidations.Load())
 		fmt.Printf("CacheErr: %d\n", counters.CacheErr.Load())
