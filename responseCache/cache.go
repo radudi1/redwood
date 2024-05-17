@@ -220,13 +220,24 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats stopWatche
 }
 
 func Set(req *http.Request, resp *http.Response, stats stopWatches) {
+	set(req, resp, stats, srcClient)
+}
+
+func set(req *http.Request, resp *http.Response, stats stopWatches, reqSrc int) {
 
 	if config.Redis.NumConn < 1 {
 		return
 	}
 
 	var logStatus string
-	defer func() { cacheLog(req, resp.StatusCode, resp.Header, logStatus, "", stats) }()
+	switch reqSrc {
+	case srcClient:
+		defer func() { cacheLog(req, resp.StatusCode, resp.Header, logStatus, "", stats) }()
+	case srcRevalidate:
+		defer func() { revalidateLog(req, resp.StatusCode, resp.Header, logStatus, "", stats) }()
+	default:
+		panic("Invalid request source received for responsecache set")
+	}
 
 	stats.setSw = stopwatch.Start()
 	defer stats.setSw.Stop()
@@ -461,23 +472,13 @@ func revalidateWorker() {
 		counters.Revalidations.Add(1)
 		httpClient := &http.Client{}
 		httpClient.Timeout = 30 * time.Second
+		req.RequestURI = "" // it is required by library that RequestURI is not set
 		resp, err := httpClient.Do(&req)
 		if err != nil {
 			log.Println("Error making HTTP request:", err)
 			continue
 		}
-		revalidateLogChan <- fmt.Sprintln(
-			req.RemoteAddr,
-			resp.StatusCode,
-			req.Method,
-			resp.Header.Get("Content-Encoding"),
-			resp.Header.Get("Content-Length"),
-			strings.SplitN(resp.Header.Get("Content-Type"), ";", 2)[0],
-			strings.ReplaceAll(resp.Header.Get("Vary"), " ", ""),
-			strings.ReplaceAll(resp.Header.Get("Cache-Control"), " ", ""),
-			limitStr(req.URL.String(), 128),
-		)
-		Set(&req, resp, stopWatches{})
+		set(&req, resp, stopWatches{}, srcRevalidate)
 		resp.Body.Close()
 	}
 }

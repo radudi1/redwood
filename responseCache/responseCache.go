@@ -13,11 +13,18 @@ import (
 	"github.com/radudi1/prioworkers"
 )
 
-// worker priorities -- priorities are from 0 to 99 - 99 is the highest priority
-const mainPrio = 90
-const setWPrio = 50
-const revalidateWPrio = 40
-const updateWPrio = 20
+const (
+
+	// worker priorities -- priorities are from 0 to 99 - 99 is the highest priority
+	mainPrio        = 90
+	setWPrio        = 50
+	revalidateWPrio = 40
+	updateWPrio     = 20
+
+	// request sources
+	srcClient     = 0
+	srcRevalidate = 1
+)
 
 var logChan chan string
 var revalidateLogChan chan string
@@ -34,8 +41,10 @@ func Init() {
 	// initialize logging workers
 	logChan = make(chan string, config.Log.LogBufferSize)
 	go cacheLogWorker(config.Log.LogFile, logChan)
-	revalidateLogChan = make(chan string, config.Log.LogBufferSize)
-	go cacheLogWorker(config.Log.RevalidateLogFile, revalidateLogChan)
+	if config.StandardViolations.EnableStandardViolations && config.StandardViolations.ServeStale {
+		revalidateLogChan = make(chan string, config.Log.LogBufferSize)
+		go cacheLogWorker(config.Log.RevalidateLogFile, revalidateLogChan)
+	}
 
 	redisInit()
 
@@ -89,6 +98,14 @@ func Init() {
 }
 
 func cacheLog(req *http.Request, statusCode int, respHeaders http.Header, cacheStatus string, cacheKey string, stats stopWatches) {
+	responsecacheLog(logChan, req, statusCode, respHeaders, cacheStatus, cacheKey, stats)
+}
+
+func revalidateLog(req *http.Request, statusCode int, respHeaders http.Header, cacheStatus string, cacheKey string, stats stopWatches) {
+	responsecacheLog(revalidateLogChan, req, statusCode, respHeaders, cacheStatus, cacheKey, stats)
+}
+
+func responsecacheLog(logChan chan string, req *http.Request, statusCode int, respHeaders http.Header, cacheStatus string, cacheKey string, stats stopWatches) {
 	logChan <- fmt.Sprintln(
 		req.RemoteAddr,
 		cacheStatus,
