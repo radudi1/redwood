@@ -142,5 +142,15 @@ func signalHandler(c chan os.Signal) {
 		fmt.Println("Update queue length: ", len(updateChan))
 		fmt.Println("Revalidate queue length: ", len(revalidateChan))
 		fmt.Printf("%+v\n", prioworkers.GetState())
+		fmt.Printf("Hits: %d\n", counters.Hits.Load())
+		fmt.Printf("Misses: %d\n", counters.Misses.Load())
+		fmt.Printf("Uncacheable: %d\n", counters.Uncacheable.Load())
+		fmt.Printf("Updates: %d\n", counters.Updates.Load())
+		fmt.Printf("Revalidations: %d\n", counters.Revalidations.Load())
+		fmt.Printf("CacheErr: %d\n", counters.CacheErr.Load())
+		fmt.Printf("SerErr: %d\n", counters.SerErr.Load())
+		fmt.Printf("EncodeErr: %d\n", counters.EncodeErr.Load())
+		fmt.Printf("ReadErr: %d\n", counters.ReadErr.Load())
+		fmt.Printf("WriteErr: %d\n", counters.WriteErr.Load())
 	}
 }

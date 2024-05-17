@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/radudi1/prioworkers"
@@ -16,6 +17,19 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/vmihailenco/msgpack/v5"
 )
+
+type Counters struct {
+	Hits          atomic.Uint64
+	Misses        atomic.Uint64
+	Uncacheable   atomic.Uint64
+	Updates       atomic.Uint64
+	Revalidations atomic.Uint64
+	CacheErr      atomic.Uint64
+	SerErr        atomic.Uint64
+	EncodeErr     atomic.Uint64
+	ReadErr       atomic.Uint64
+	WriteErr      atomic.Uint64
+}
 
 type stopWatches struct {
 	getSw, setSw stopwatch.StopWatch
@@ -47,6 +61,7 @@ var cacheableStatusCodes = [...]int{
 	308, // permanent redirect
 }
 
+var counters Counters
 var setChan chan cacheReqResp
 var updateChan chan cacheReqResp
 var revalidateChan chan http.Request
@@ -62,12 +77,8 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats stopWatche
 	var cacheObj cacheObjType
 	var cacheStatus string
 	var cacheKey string
-	defer (func() {
-		if found && cacheStatus != "" {
-			sendHeaders(w, statusCode, cacheObj.Headers, cacheStatus, cacheKey, req, stats)
-		}
-	})()
 
+	// init
 	stats.getSw = stopwatch.Start()
 	defer stats.getSw.Stop()
 
@@ -77,6 +88,16 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats stopWatche
 	}
 
 	cacheKey = getKey(req, "")
+
+	// send headers and update stats on function return
+	defer (func() {
+		if found {
+			counters.Hits.Add(1)
+			if cacheStatus != "" {
+				sendHeaders(w, statusCode, cacheObj.Headers, cacheStatus, cacheKey, req, stats)
+			}
+		}
+	})()
 
 	// we ONLY cache some requests
 	if req.Method != "GET" && req.Method != "HEAD" {
@@ -94,6 +115,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats stopWatche
 	}
 	serErr := msgpack.Unmarshal([]byte(cacheObjSer), &cacheObj)
 	if serErr != nil {
+		counters.SerErr.Add(1)
 		log.Println(serErr)
 		return
 	}
@@ -107,6 +129,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats stopWatche
 		}
 		serErr := msgpack.Unmarshal([]byte(cacheObjSer), &cacheObj)
 		if serErr != nil {
+			counters.SerErr.Add(1)
 			log.Println(serErr)
 			return
 		}
@@ -159,6 +182,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats stopWatche
 			var encodedBuf bytes.Buffer
 			encoding, reEncodeErr := reEncode(&encodedBuf, &cacheObj.Body, respEncoding, acceptEncoding)
 			if reEncodeErr != nil {
+				counters.EncodeErr.Add(1)
 				log.Println("Could not reeencode cached response: ", reEncodeErr)
 				return
 			}
@@ -179,10 +203,12 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats stopWatche
 	// send response body
 	n, writeErr := w.Write(cacheObj.Body)
 	if writeErr != nil {
+		counters.WriteErr.Add(1)
 		log.Println(writeErr)
 		return
 	}
 	if n != len(cacheObj.Body) {
+		counters.WriteErr.Add(1)
 		log.Println("Written ", n, " bytes to client instead of ", len(cacheObj.Body), "!!!")
 	}
 	return
@@ -204,6 +230,15 @@ func Set(req *http.Request, resp *http.Response, stats stopWatches) {
 		workerId := prioworkers.WorkStart(mainPrio)
 		defer prioworkers.WorkEnd(workerId)
 	}
+
+	// update counters when function returns
+	defer (func() {
+		if logStatus == "MISS" {
+			counters.Misses.Add(1)
+		} else {
+			counters.Uncacheable.Add(1)
+		}
+	})()
 
 	// if it's a nobump domain we should not cache it
 	if MapHasKey(noBumpDomains, req.Host) {
@@ -275,6 +310,7 @@ func Set(req *http.Request, resp *http.Response, stats stopWatches) {
 		err = nil
 	}
 	if err != nil {
+		counters.ReadErr.Add(1)
 		log.Println("Could not read body for caching")
 		logStatus = "UC_RDBODYERR"
 		return
@@ -329,12 +365,14 @@ func setWorker(redisConn *redis.Client) {
 			dummyCacheObj.Body = nil
 			cacheObjSer, serErr := msgpack.Marshal(dummyCacheObj)
 			if serErr != nil {
+				counters.SerErr.Add(1)
 				log.Println(serErr)
 				cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_SERERR", "", stats)
 				continue
 			}
 			redisErr := cacheConn().Set(ctx, getKey(req, ""), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
 			if redisErr != nil {
+				counters.CacheErr.Add(1)
 				log.Println(redisErr)
 				cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_CACHEERR", "", stats)
 				continue
@@ -343,6 +381,7 @@ func setWorker(redisConn *redis.Client) {
 
 		cacheObjSer, serErr := msgpack.Marshal(cacheObj)
 		if serErr != nil {
+			counters.SerErr.Add(1)
 			log.Println(serErr)
 			cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_SERERR", "", stats)
 			continue
@@ -350,6 +389,7 @@ func setWorker(redisConn *redis.Client) {
 		// store response with body
 		redisErr := redisConn.Set(ctx, getKey(req, cacheObj.Headers.Get("Vary")), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
 		if redisErr != nil {
+			counters.CacheErr.Add(1)
 			log.Println(redisErr)
 			cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_CACHEERR", "", stats)
 			continue
@@ -381,15 +421,18 @@ func updateTtlWorker(redisConn *redis.Client) {
 		cacheKey := getKey(req, "")
 		redisErr := redisConn.Expire(ctx, cacheKey, time.Duration(maxAge)*time.Second).Err()
 		if redisErr != nil {
+			counters.CacheErr.Add(1)
 			log.Println("Could not update TTL for key ", cacheKey, " to ", time.Duration(maxAge)*time.Second, " seconds")
 		}
 		if respHeaders.Get("Vary") != "" {
 			cacheKey := getKey(req, respHeaders.Get("Vary"))
 			redisErr := redisConn.Expire(ctx, cacheKey, time.Duration(maxAge)*time.Second).Err()
 			if redisErr != nil {
+				counters.CacheErr.Add(1)
 				log.Println("Could not update TTL for key ", cacheKey, " to ", time.Duration(maxAge)*time.Second, " seconds")
 			}
 		}
+		counters.Updates.Add(1)
 	}
 }
 
@@ -403,6 +446,7 @@ func revalidateWorker() {
 		if config.Workers.PrioritiesEnabled {
 			workerId = prioworkers.WorkStart(revalidateWPrio)
 		}
+		counters.Revalidations.Add(1)
 		httpClient := &http.Client{}
 		httpClient.Timeout = 30 * time.Second
 		resp, err := httpClient.Do(&req)
