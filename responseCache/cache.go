@@ -248,7 +248,16 @@ func set(req *http.Request, resp *http.Response, stats stopWatches, reqSrc int) 
 	}
 
 	var cacheObj *cacheObjType
+
+	// try to get body size from content-length header - needed for stats is well as check
 	contentLength := int64(-1)
+	contenLengthStr := strings.TrimSpace(req.Header.Get("Content-length"))
+	if contenLengthStr != "" {
+		n, err := strconv.ParseUint(contenLengthStr, 10, 63)
+		if err == nil {
+			contentLength = int64(n)
+		}
+	}
 
 	// update counters when function returns
 	defer (func() {
@@ -301,13 +310,6 @@ func set(req *http.Request, resp *http.Response, stats stopWatches, reqSrc int) 
 	// 	}
 	// }
 	sizeLimit := int(math.Min(float64(config.Cache.MaxSize), 512*1024*1024)) // redis max object size is 512 MB
-	contenLengthStr := strings.TrimSpace(req.Header.Get("Content-length"))
-	if contenLengthStr != "" {
-		n, err := strconv.ParseUint(contenLengthStr, 10, 63)
-		if err == nil {
-			contentLength = int64(n)
-		}
-	}
 	if contentLength > int64(sizeLimit) {
 		logStatus = "UC_TOOBIG"
 		return
