@@ -145,8 +145,8 @@ github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZN
 github.com/prometheus/client_model v0.0.0-20190812154241-14fe0d1b01d4/go.mod h1:xMI15A0UPsDsEKsMN9yxemIoYk6Tm2C1GtYGdfGttqA=
 github.com/qri-io/starlib v0.5.0 h1:NlveoBAhO6mNgM7+JpM9QlHh3/3pOtOiH6iXaqSdVK0=
 github.com/qri-io/starlib v0.5.0/go.mod h1:FpVumyB2CMrKIrjf39fAi4uydYWVvnWEvXEOwfzZRHY=
-github.com/radudi1/prioworkers v0.0.0-20240517071802-c40116262dd5 h1:TsPZ2/GVu4Xvv2kDOz2x3eJKwIR/z39fmg0vMd5z7S8=
-github.com/radudi1/prioworkers v0.0.0-20240517071802-c40116262dd5/go.mod h1:x/WWvDKZnnOpiUVNTp1ja3nk/OXQ1Y+b+A2t2tApANE=
+github.com/radudi1/prioworkers v0.0.0-20240520155308-318715284e59 h1:q6aCRuMv30fCQyfyG6xZQ1nKDl1779rZGQMgTHb3P74=
+github.com/radudi1/prioworkers v0.0.0-20240520155308-318715284e59/go.mod h1:x/WWvDKZnnOpiUVNTp1ja3nk/OXQ1Y+b+A2t2tApANE=
 github.com/radudi1/stopwatch v0.0.0-20240427084450-6fb736cb06b1 h1:1yq0JKECz0vOLcH4dvcgbUSF8RCFTnU0uCDygi4JZBI=
 github.com/radudi1/stopwatch v0.0.0-20240427084450-6fb736cb06b1/go.mod h1:a9pGwhtCKxeB3fa5LIkfwNFVBg7lojlTZYlOJUHJe+w=
 github.com/redis/go-redis/v9 v9.5.1 h1:H1X4D3yHPaYrkL5X06Wh6xNVM/pX0Ft4RV0vMGvLBh8=
