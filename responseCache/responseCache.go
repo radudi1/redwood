@@ -97,15 +97,15 @@ func Init() {
 
 }
 
-func cacheLog(req *http.Request, statusCode int, respHeaders http.Header, cacheStatus string, cacheKey string, stats stopWatches) {
+func cacheLog(req *http.Request, statusCode int, respHeaders http.Header, cacheStatus string, cacheKey string, stats *stopWatches) {
 	responsecacheLog(logChan, req, statusCode, respHeaders, cacheStatus, cacheKey, stats)
 }
 
-func revalidateLog(req *http.Request, statusCode int, respHeaders http.Header, cacheStatus string, cacheKey string, stats stopWatches) {
+func revalidateLog(req *http.Request, statusCode int, respHeaders http.Header, cacheStatus string, cacheKey string, stats *stopWatches) {
 	responsecacheLog(revalidateLogChan, req, statusCode, respHeaders, cacheStatus, cacheKey, stats)
 }
 
-func responsecacheLog(logChan chan string, req *http.Request, statusCode int, respHeaders http.Header, cacheStatus string, cacheKey string, stats stopWatches) {
+func responsecacheLog(logChan chan string, req *http.Request, statusCode int, respHeaders http.Header, cacheStatus string, cacheKey string, stats *stopWatches) {
 	logChan <- fmt.Sprintln(
 		req.RemoteAddr,
 		cacheStatus,

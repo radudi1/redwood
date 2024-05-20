@@ -94,9 +94,10 @@ OverrideExpire = false
 
 # Cache-control maxage headers can be ignored if OverrideCacheControl is set to true
 # In this situation the algorithm works like this:
-# We compute time since last-modified divided by AgeDivisor and we cap it to OverrideCacheControlMaxAve
+# We compute time since last-modified divided by AgeDivisor and we cap it to OverrideCacheControlMaxAge
 # We get max-age from cache-control
 # We set the ttl to be the maximum of the 2 values
+# If no cache-control and no last-modified headers are present we try to set ttl to Age / AgeDivisor
 # If set to true it's behavior implies OverrideExpire set to true as well
 OverrideCacheControl = false
-OverrideCacheControlMaxAge = 86400
+OverrideCacheControlMaxAge = 43200
