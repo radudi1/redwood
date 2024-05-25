@@ -527,7 +527,7 @@ func getMaxAge(cacheControl map[string]string, respHeaders *http.Header, withVio
 				}
 			}
 			// there are no headers present that we can't compute ttl on so we return the minimum default
-			return validateMaxAge(config.StandardViolations.OverrideCacheControlMaxAge, respHeaders)
+			return validateMaxAge(config.StandardViolations.DefaultAge, respHeaders)
 		}
 		// if OverrideCacheControl is disabled we use this algo
 		if maxAge > 0 {

@@ -101,3 +101,7 @@ OverrideExpire = false
 # If set to true it's behavior implies OverrideExpire set to true as well
 OverrideCacheControl = false
 OverrideCacheControlMaxAge = 43200
+
+# Is DefaultAge is greater than 0 and there are no headers on which we can compute caching ttl
+# the response will be cached for DefaultAge seconds
+DefaultAge = 0
