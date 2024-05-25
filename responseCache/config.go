@@ -49,6 +49,7 @@ type StandardViolationsConfig struct {
 	OverrideExpire             bool
 	OverrideCacheControl       bool
 	OverrideCacheControlMaxAge int
+	DefaultAge                 int
 }
 
 type Config struct {
