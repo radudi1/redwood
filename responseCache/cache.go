@@ -79,7 +79,7 @@ var revalidateChan chan http.Request
 
 func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatches) {
 
-	if config.Redis.NumConn < 1 {
+	if config.Redis.MaxNumConn < 1 {
 		return false, nil
 	}
 
@@ -123,7 +123,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 	}
 
 	// try to serve from cache
-	cacheObjSer, redisErr := cacheConn().Get(ctx, cacheObjInfo.CacheKey).Result()
+	cacheObjSer, redisErr := cacheConn().Get(redisContext, cacheObjInfo.CacheKey).Result()
 	if redisErr == redis.Nil {
 		return
 	}
@@ -137,7 +137,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 	if cacheObj.Headers.Get("Vary") != "" {
 		// we have a vary header so we fetch the real response according to vary
 		cacheObjInfo.CacheKey = getKey(req, cacheObj.Headers.Get("Vary"))
-		cacheObjSer, redisErr := cacheConn().Get(ctx, cacheObjInfo.CacheKey).Result()
+		cacheObjSer, redisErr := cacheConn().Get(redisContext, cacheObjInfo.CacheKey).Result()
 		if redisErr == redis.Nil {
 			return
 		}
@@ -160,7 +160,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 		}
 	} else { // ServeStale is enabled
 		if cacheObjInfo.IsStale {
-			revalidateChan <- *req.Clone(ctx)
+			revalidateChan <- *req.Clone(redisContext)
 		}
 	}
 	// if it's a HEAD request or has certain response status codes we don't send the body  - RFCs 2616 7230
@@ -241,7 +241,7 @@ func Set(req *http.Request, resp *http.Response, stats *stopWatches) {
 
 func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int) {
 
-	if config.Redis.NumConn < 1 {
+	if config.Redis.MaxNumConn < 1 {
 		return
 	}
 
@@ -285,7 +285,7 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 	// if it's a cloudflare damned domain that has stupid protection (eg: ja3) we add it to nobump domain list so that future requests pass unbumped and allow user to access it properly - stupid stupid but what elese is there to do
 	if resp.StatusCode == 403 && resp.Header.Get("server") == "cloudflare" {
 		noBumpDomains[req.Host] = struct{}{}
-		cacheConn().SAdd(ctx, noBumpDomainsKey, req.Host)
+		cacheConn().SAdd(redisContext, noBumpDomainsKey, req.Host)
 		logStatus = "UC_TONOBUMP"
 		return
 	}
@@ -359,7 +359,7 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 		Body:       body,
 	}
 
-	setChan <- cacheReqResp{cacheObj: *cacheObj, req: *req.Clone(ctx), maxAge: maxAge}
+	setChan <- cacheReqResp{cacheObj: *cacheObj, req: *req.Clone(redisContext), maxAge: maxAge}
 
 	logStatus = "MISS"
 
@@ -393,7 +393,7 @@ func setWorker(redisConn *redis.Client) {
 				cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_SERERR", "", &stats)
 				continue
 			}
-			redisErr := cacheConn().Set(ctx, getKey(req, ""), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
+			redisErr := cacheConn().Set(redisContext, getKey(req, ""), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
 			if redisErr != nil {
 				counters.CacheErr.Add(1)
 				log.Println(redisErr)
@@ -410,7 +410,7 @@ func setWorker(redisConn *redis.Client) {
 			continue
 		}
 		// store response with body
-		redisErr := redisConn.Set(ctx, getKey(req, cacheObj.Headers.Get("Vary")), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
+		redisErr := redisConn.Set(redisContext, getKey(req, cacheObj.Headers.Get("Vary")), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
 		if redisErr != nil {
 			counters.CacheErr.Add(1)
 			log.Println(redisErr)
@@ -443,14 +443,14 @@ func updateTtlWorker(redisConn *redis.Client) {
 			continue
 		}
 		cacheKey := getKey(req, "")
-		redisErr := redisConn.Expire(ctx, cacheKey, time.Duration(maxAge)*time.Second).Err()
+		redisErr := redisConn.Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second).Err()
 		if redisErr != nil {
 			counters.CacheErr.Add(1)
 			log.Println("Could not update TTL for key ", cacheKey, " to ", time.Duration(maxAge)*time.Second, " seconds")
 		}
 		if respHeaders.Get("Vary") != "" {
 			cacheKey := getKey(req, respHeaders.Get("Vary"))
-			redisErr := redisConn.Expire(ctx, cacheKey, time.Duration(maxAge)*time.Second).Err()
+			redisErr := redisConn.Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second).Err()
 			if redisErr != nil {
 				counters.CacheErr.Add(1)
 				log.Println("Could not update TTL for key ", cacheKey, " to ", time.Duration(maxAge)*time.Second, " seconds")

@@ -7,29 +7,20 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"sync/atomic"
 
 	"github.com/redis/go-redis/v9"
 )
 
-var redisConnArr []*redis.Client
-var redisCurrCon atomic.Int64
-var ctx = context.Background()
+var redisConn *redis.Client
+var redisContext context.Context
 
 func redisInit() {
 	// connect to redis
-	// we make sure that we get enough connections for workers and leave at least one connection for main processing
-	if config.Redis.NumConn < config.Workers.CacheSetNumWorkers+config.Workers.CacheUpdateNumWorkers+1 {
-		config.Redis.NumConn = config.Workers.CacheSetNumWorkers + config.Workers.CacheUpdateNumWorkers + 1
+	redisConn = cacheOpen()
+	if redisConn == nil {
+		log.Panicln("!!! ERROR !!! COULD NOT CONNECT TO REDIS - responseCache IS DISABLED")
 	}
-	redisConnArr = make([]*redis.Client, config.Redis.NumConn)
-	for k := range redisConnArr {
-		conn := cacheOpen()
-		if conn == nil {
-			log.Panicln("!!! ERROR !!! COULD NOT CONNECT TO REDIS - responseCache IS DISABLED")
-		}
-		redisConnArr[k] = conn
-	}
+	redisContext = context.Background()
 }
 
 func getKey(req *http.Request, varyHeader string) string {
@@ -45,12 +36,7 @@ func getKey(req *http.Request, varyHeader string) string {
 }
 
 func cacheConn() *redis.Client {
-	idx := redisCurrCon.Add(1)
-	if idx >= int64(config.Redis.NumConn) {
-		redisCurrCon.Store(0)
-		idx = 0
-	}
-	return redisConnArr[idx]
+	return redisConn
 }
 
 func cacheOpen() *redis.Client {
@@ -60,6 +46,7 @@ func cacheOpen() *redis.Client {
 		return nil
 	}
 	opts.DB = config.Redis.DBNum
-	redisConn := redis.NewClient(opts)
-	return redisConn
+	opts.MaxActiveConns = config.Redis.MaxNumConn
+	conn := redis.NewClient(opts)
+	return conn
 }

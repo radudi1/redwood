@@ -14,11 +14,11 @@ import (
 )
 
 func IsCertValid(cert *x509.Certificate) bool {
-	if config.Redis.NumConn < 1 { // respCache is actually disabled
+	if config.Redis.MaxNumConn < 1 { // respCache is actually disabled
 		return false
 	}
 	sum := md5.Sum(cert.Raw)
-	found, err := cacheConn().Exists(ctx, "cert:"+hex.EncodeToString(sum[:])).Result()
+	found, err := cacheConn().Exists(redisContext, "cert:"+hex.EncodeToString(sum[:])).Result()
 	if err != nil {
 		log.Println(err)
 		return false
@@ -27,14 +27,14 @@ func IsCertValid(cert *x509.Certificate) bool {
 }
 
 func GetFakeCert(serverCert *x509.Certificate, privateKey crypto.PrivateKey) (fakeCert tls.Certificate, found bool) {
-	if config.Redis.NumConn < 1 { // respCache is actually disabled
+	if config.Redis.MaxNumConn < 1 { // respCache is actually disabled
 		return tls.Certificate{}, false
 	}
 	fakeCert = tls.Certificate{}
 	found = false
 	sum := md5.Sum(serverCert.Raw)
 	cacheKey := "cert:" + hex.EncodeToString(sum[:])
-	cacheObjSer, redisErr := cacheConn().Get(ctx, cacheKey).Result()
+	cacheObjSer, redisErr := cacheConn().Get(redisContext, cacheKey).Result()
 	if redisErr == redis.Nil {
 		return
 	}
@@ -49,7 +49,7 @@ func GetFakeCert(serverCert *x509.Certificate, privateKey crypto.PrivateKey) (fa
 }
 
 func SetCertAsValid(serverCert *x509.Certificate, fakeCert *tls.Certificate) {
-	if config.Redis.NumConn < 1 { // respCache is actually disabled
+	if config.Redis.MaxNumConn < 1 { // respCache is actually disabled
 		return
 	}
 	sum := md5.Sum(serverCert.Raw)
@@ -65,7 +65,7 @@ func SetCertAsValid(serverCert *x509.Certificate, fakeCert *tls.Certificate) {
 	if ttl.Seconds() > float64(config.Cache.MaxAge) {
 		ttl = time.Duration(config.Cache.MaxAge) * time.Second
 	}
-	redisErr := cacheConn().Set(ctx, "cert:"+hex.EncodeToString(sum[:]), fakeCertSer, ttl).Err()
+	redisErr := cacheConn().Set(redisContext, "cert:"+hex.EncodeToString(sum[:]), fakeCertSer, ttl).Err()
 	if redisErr != nil {
 		log.Println(redisErr)
 	}
