@@ -33,8 +33,8 @@ func Init() {
 
 	loadConfig()
 
-	if config.Redis.MaxNumConn < 1 { // responseCache is actually disabled
-		log.Println("!!! WARNING - responseCache is disabled! - set RedisNumConn to something greater than 0 in responseCache config in order to enable caching")
+	if !config.Cache.Enabled { // responseCache is actually disabled
+		log.Println("!!! WARNING - responseCache is disabled! - set Enabled to true in the Cache section of responseCache.toml configuration file")
 		return
 	}
 
@@ -65,7 +65,6 @@ func Init() {
 		config.Workers.CacheSetNumWorkers = 1
 	}
 	for i := 0; i < config.Workers.CacheSetNumWorkers; i++ {
-		config.Redis.MaxNumConn--
 		go setWorker(redisConn)
 	}
 
@@ -75,7 +74,6 @@ func Init() {
 		config.Workers.CacheUpdateNumWorkers = 1
 	}
 	for i := 0; i < config.Workers.CacheUpdateNumWorkers; i++ {
-		config.Redis.MaxNumConn--
 		go updateTtlWorker(redisConn)
 	}
 

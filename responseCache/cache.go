@@ -79,7 +79,7 @@ var revalidateChan chan http.Request
 
 func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatches) {
 
-	if config.Redis.MaxNumConn < 1 {
+	if !config.Cache.Enabled {
 		return false, nil
 	}
 
@@ -232,6 +232,9 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 }
 
 func Set(req *http.Request, resp *http.Response, stats *stopWatches) {
+	if !config.Cache.Enabled {
+		return
+	}
 	if config.Workers.PrioritiesEnabled {
 		workerId := prioworkers.WorkStart(mainPrio)
 		defer prioworkers.WorkEnd(workerId)
@@ -240,10 +243,6 @@ func Set(req *http.Request, resp *http.Response, stats *stopWatches) {
 }
 
 func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int) {
-
-	if config.Redis.MaxNumConn < 1 {
-		return
-	}
 
 	var logStatus string
 	switch reqSrc {

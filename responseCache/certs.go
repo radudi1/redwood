@@ -14,7 +14,7 @@ import (
 )
 
 func IsCertValid(cert *x509.Certificate) bool {
-	if config.Redis.MaxNumConn < 1 { // respCache is actually disabled
+	if !config.Cache.Enabled { // respCache is actually disabled
 		return false
 	}
 	sum := md5.Sum(cert.Raw)
@@ -27,7 +27,7 @@ func IsCertValid(cert *x509.Certificate) bool {
 }
 
 func GetFakeCert(serverCert *x509.Certificate, privateKey crypto.PrivateKey) (fakeCert tls.Certificate, found bool) {
-	if config.Redis.MaxNumConn < 1 { // respCache is actually disabled
+	if !config.Cache.Enabled { // respCache is actually disabled
 		return tls.Certificate{}, false
 	}
 	fakeCert = tls.Certificate{}
@@ -49,7 +49,7 @@ func GetFakeCert(serverCert *x509.Certificate, privateKey crypto.PrivateKey) (fa
 }
 
 func SetCertAsValid(serverCert *x509.Certificate, fakeCert *tls.Certificate) {
-	if config.Redis.MaxNumConn < 1 { // respCache is actually disabled
+	if !config.Cache.Enabled { // respCache is actually disabled
 		return
 	}
 	sum := md5.Sum(serverCert.Raw)
