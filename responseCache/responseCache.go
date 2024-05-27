@@ -33,7 +33,7 @@ func Init() {
 
 	loadConfig()
 
-	if config.Redis.NumConn < 1 { // responseCache is actually disabled
+	if config.Redis.MaxNumConn < 1 { // responseCache is actually disabled
 		log.Println("!!! WARNING - responseCache is disabled! - set RedisNumConn to something greater than 0 in responseCache config in order to enable caching")
 		return
 	}
@@ -65,8 +65,8 @@ func Init() {
 		config.Workers.CacheSetNumWorkers = 1
 	}
 	for i := 0; i < config.Workers.CacheSetNumWorkers; i++ {
-		config.Redis.NumConn--
-		go setWorker(redisConnArr[config.Redis.NumConn])
+		config.Redis.MaxNumConn--
+		go setWorker(redisConn)
 	}
 
 	// spin up cache update workers
@@ -75,8 +75,8 @@ func Init() {
 		config.Workers.CacheUpdateNumWorkers = 1
 	}
 	for i := 0; i < config.Workers.CacheUpdateNumWorkers; i++ {
-		config.Redis.NumConn--
-		go updateTtlWorker(redisConnArr[config.Redis.NumConn])
+		config.Redis.MaxNumConn--
+		go updateTtlWorker(redisConn)
 	}
 
 	// spin up revalidate workers

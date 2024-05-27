@@ -6,9 +6,10 @@ Url = "redis://redishost:6379"
 # Redis DB number
 DBNum = 0
 
-# Number of parallel connections to Redis
-NumConn = 256
-
+# Maximum number of parallel connections to Redis
+# New connections to redis are initiated and closed as needed up to this number
+# If set to 0 there will be no limit
+MaxNumConn = 0
 
 [Cache]
 
