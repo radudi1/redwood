@@ -1,17 +1,7 @@
-[Redis]
-
-# Redis url to connect to - this is where cache will be saved
-Url = "redis://redishost:6379"
-
-# Redis DB number
-DBNum = 0
-
-# Maximum number of parallel connections to Redis
-# New connections to redis are initiated and closed as needed up to this number
-# If set to 0 there will be no limit
-MaxNumConn = 0
-
 [Cache]
+
+# If this is set to false caching will be completely disabled and you can ignore the rest of this file
+Enable = true
 
 # If http response allows longer caching it will be capped to this many seconds.
 MaxAge = 604800
@@ -32,6 +22,20 @@ RestrictedMimePrefixes = [ "video/" ]
 BrotliLevel = 1
 GZIPLevel = 1
 DeflateLevel = 1
+
+
+[Redis]
+
+# Redis url to connect to - this is where cache will be saved
+Url = "redis://redishost:6379"
+
+# Redis DB number
+DBNum = 0
+
+# Maximum number of parallel connections to Redis
+# New connections to redis are initiated and closed as needed up to this number
+# If set to 0 there will be no limit
+MaxNumConn = 0
 
 
 [Log]

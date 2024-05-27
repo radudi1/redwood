@@ -18,6 +18,7 @@ type RedisConfig struct {
 }
 
 type CacheConfig struct {
+	Enabled                bool
 	MaxAge                 int
 	MaxSize                int
 	BrotliLevel            int
