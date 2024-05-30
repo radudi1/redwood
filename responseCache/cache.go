@@ -152,22 +152,27 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 	// check if cached object is stale and decide what to do if it is
 	respCacheControl := splitHeader(&cacheObj.Headers, "Cache-Control", ",")
 	respMaxAge, maxAgeErr := getMaxAge(respCacheControl, &cacheObj.Headers, false)
-	cacheObjInfo.IsStale = maxAgeErr != nil || respMaxAge < getResponseAge(&cacheObj.Headers)
-	// check if ServeStale is enabled and act accordingly
-	if !config.StandardViolations.EnableStandardViolations || !config.StandardViolations.ServeStale {
-		if cacheObjInfo.IsStale || MapHasKey(respCacheControl, "must-revalidate") || MapHasKey(respCacheControl, "proxy-revalidate") {
-			return
-		}
-	} else { // ServeStale is enabled
-		if cacheObjInfo.IsStale {
-			revalidateChan <- cacheReqResp{
-				req: *req.Clone(redisContext),
-				cacheObj: cacheObjType{
-					Headers: cacheObj.Headers.Clone(),
-				},
+	respAge := getResponseAge(&cacheObj.Headers)
+	cacheObjInfo.IsStale = maxAgeErr != nil || respMaxAge < respAge
+	// check if cache object is stale and act accordingly
+	if cacheObjInfo.IsStale {
+		// check if ServeStale is enabled and act accordingly
+		if !config.StandardViolations.EnableStandardViolations || !config.StandardViolations.ServeStale {
+			// check if we have stale-while-revalidate and we object is fresh enough for it
+			maxStaleAge, _ := MapElemToI(cacheControl, "stale-while-revalidate")
+			if maxStaleAge < respAge {
+				return
 			}
 		}
+		// stale-while-revalidate allows us to still use cached obj or ServeStale is enabled
+		revalidateChan <- cacheReqResp{
+			req: *req.Clone(redisContext),
+			cacheObj: cacheObjType{
+				Headers: cacheObj.Headers.Clone(),
+			},
+		}
 	}
+
 	// if it's a HEAD request or has certain response status codes we don't send the body  - RFCs 2616 7230
 	// https://stackoverflow.com/questions/78182848/does-http-differentiate-between-an-empty-body-and-no-body
 	if req.Method == "HEAD" || int(cacheObj.StatusCode/100) == 1 || cacheObj.StatusCode == 204 || cacheObj.StatusCode == 304 {
