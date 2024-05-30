@@ -1,7 +1,7 @@
 [Cache]
 
 # If this is set to false caching will be completely disabled and you can ignore the rest of this file
-Enable = true
+Enabled = true
 
 # If http response allows longer caching it will be capped to this many seconds.
 MaxAge = 604800
@@ -110,3 +110,8 @@ OverrideCacheControlMaxAge = 43200
 # Is DefaultAge is greater than 0 and there are no headers on which we can compute caching ttl
 # the response will be cached for DefaultAge seconds
 DefaultAge = 0
+
+# WARNING!!! THIS SETTING ENABLES REALLY DANGEROUS HEURISTICS THAT CAN BREAK THINGS BADLY
+# THIS WILL ALSO LEAD TO SERIOUS SECURITY AND PRIVACY PROBLEMS
+# DO NOT ENABLE THIS!!!
+EnableDangerousHeuristics = false
