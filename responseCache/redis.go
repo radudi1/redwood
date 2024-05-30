@@ -24,7 +24,7 @@ func redisInit() {
 }
 
 func getKey(req *http.Request, varyHeader string) string {
-	keyStr := req.Host + " " + req.RequestURI + req.Header.Get("Cookie")
+	keyStr := req.Host + " " + req.RequestURI + strings.Join(req.Header.Values("Cookie"), "") + strings.Join(req.Header.Values("X-API-Key"), "")
 	if varyHeader != "" {
 		varyArr := strings.Split(varyHeader, ",")
 		for _, v := range varyArr {
