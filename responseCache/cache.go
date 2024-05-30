@@ -298,11 +298,15 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 		logStatus = "UC_RESPCODE"
 		return
 	}
-	if req.Header.Get("Authorization") != "" || strings.TrimSpace(req.Header.Get("Vary")) == "*" {
+	if req.Header.Get("Authorization") != "" || resp.Header.Get("WWW-Authenticate") != "" || strings.TrimSpace(req.Header.Get("Vary")) == "*" {
 		logStatus = "UC_AUTHVARY"
 		return
 	}
 	cacheControl := splitHeader(&resp.Header, "Cache-Control", ",")
+	if resp.Header.Get("Set-Cookie") != "" && !MapHasKey(cacheControl, "public") {
+		logStatus = "UC_SETCOOKIE"
+		return
+	}
 	if MapHasKey(cacheControl, "private") || MapHasKey(cacheControl, "no-cache") || MapHasKey(cacheControl, "no-store") || cacheControl["max-age"] == "0" {
 		// if dangerous heuristics are not enabled we can't cache it
 		if !config.StandardViolations.EnableStandardViolations || !config.StandardViolations.EnableDangerousHeuristics {
