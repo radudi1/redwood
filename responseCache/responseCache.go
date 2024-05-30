@@ -79,7 +79,7 @@ func Init() {
 
 	// spin up revalidate workers
 	if config.StandardViolations.EnableStandardViolations && config.StandardViolations.ServeStale {
-		revalidateChan = make(chan http.Request, config.Workers.WorkerBufferSize)
+		revalidateChan = make(chan cacheReqResp, config.Workers.WorkerBufferSize)
 		if config.StandardViolations.RevalidateNumWorkers < 1 {
 			config.StandardViolations.RevalidateNumWorkers = 1
 		}
