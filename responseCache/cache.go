@@ -303,9 +303,20 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 		return
 	}
 	cacheControl := splitHeader(&resp.Header, "Cache-Control", ",")
-	if MapHasKey(cacheControl, "private") || MapHasKey(cacheControl, "no-cache") || MapHasKey(cacheControl, "no-store") {
-		logStatus = "UC_CACHECTRL"
-		return
+	if MapHasKey(cacheControl, "private") || MapHasKey(cacheControl, "no-cache") || MapHasKey(cacheControl, "no-store") || cacheControl["max-age"] == "0" {
+		// if dangerous heuristics are not enabled we can't cache it
+		if !config.StandardViolations.EnableStandardViolations || !config.StandardViolations.EnableDangerousHeuristics {
+			logStatus = "UC_CACHECTRL"
+			return
+		}
+		// we are allowed to use dangerous heuristics
+		// we check that we have specific cache control indications that we can cache
+		// and that there are no indications that the response is specific to a certain user/session/etc.
+		if (!MapHasKey(cacheControl, "s-maxage") && !MapHasKey(cacheControl, "max-age")) ||
+			cacheControl["max-age"] == "0" || req.Header.Get("Cookie") != "" || resp.Header.Get("Set-Cookie") != "" {
+			logStatus = "UC_CACHECTRL"
+			return
+		}
 	}
 	sizeLimit := int(math.Min(float64(config.Cache.MaxSize), 512*1024*1024)) // redis max object size is 512 MB
 	if resp.ContentLength > int64(sizeLimit) {

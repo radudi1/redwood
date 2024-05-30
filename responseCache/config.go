@@ -51,6 +51,7 @@ type StandardViolationsConfig struct {
 	OverrideCacheControl       bool
 	OverrideCacheControlMaxAge int
 	DefaultAge                 int
+	EnableDangerousHeuristics  bool
 }
 
 type Config struct {
