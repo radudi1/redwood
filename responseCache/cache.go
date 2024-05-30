@@ -541,7 +541,7 @@ func getMaxAge(cacheControl map[string]string, respHeaders *http.Header, withVio
 	}
 	// if standard violation is enabled use this algorithm
 	if withViolations {
-		maxAge := max(getCacheControlTtl(cacheControl, respHeaders), getLastModifiedTtl(respHeaders))
+		maxAge := getCacheControlTtl(cacheControl, respHeaders)
 		// if OverrideCacheControl is enabled we use this algo
 		if config.StandardViolations.OverrideCacheControl {
 			maxAge = max(maxAge, min(getLastModifiedTtl(respHeaders), config.StandardViolations.OverrideCacheControlMaxAge))
