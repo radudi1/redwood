@@ -100,13 +100,19 @@ func splitHeader(headers *http.Header, headerName string, delimiter string) map[
 
 func MapHasKey[V any](haystack map[string]V, needle string) bool {
 	_, hasKey := haystack[needle]
+	if !hasKey {
+		_, hasKey = haystack[strings.ToLower(needle)]
+	}
 	return hasKey
 }
 
 func MapElemToI(m map[string]string, key string) (val int, noerr bool) {
 	strV, mapErr := m[key]
 	if !mapErr {
-		return 0, false
+		strV, mapErr = m[strings.ToLower(key)]
+		if !mapErr {
+			return 0, false
+		}
 	}
 	v, convErr := strconv.Atoi(strV)
 	if convErr != nil {
