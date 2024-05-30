@@ -75,7 +75,7 @@ var cacheableStatusCodes = [...]int{
 var counters Counters
 var setChan chan cacheReqResp
 var updateChan chan cacheReqResp
-var revalidateChan chan http.Request
+var revalidateChan chan cacheReqResp
 
 func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatches) {
 
@@ -160,7 +160,12 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 		}
 	} else { // ServeStale is enabled
 		if cacheObjInfo.IsStale {
-			revalidateChan <- *req.Clone(redisContext)
+			revalidateChan <- cacheReqResp{
+				req: *req.Clone(redisContext),
+				cacheObj: cacheObjType{
+					Headers: cacheObj.Headers.Clone(),
+				},
+			}
 		}
 	}
 	// if it's a HEAD request or has certain response status codes we don't send the body  - RFCs 2616 7230
@@ -480,25 +485,33 @@ func revalidateWorker() {
 		if config.Workers.PrioritiesEnabled && workerId >= 0 {
 			prioworkers.WorkEnd(workerId)
 		}
-		req := <-revalidateChan
+		msg := <-revalidateChan
 		if config.Workers.PrioritiesEnabled {
 			workerId = prioworkers.WorkStart(revalidateWPrio)
 		}
 		counters.Revalidations.Add(1)
+		// conditional validation if possible
+		if msg.cacheObj.Headers.Get("ETag") != "" {
+			msg.req.Header.Add("If-None-Match", strings.Join(msg.cacheObj.Headers.Values("ETag"), ", "))
+		} else if msg.cacheObj.Headers.Get("Date") != "" {
+			msg.req.Header.Add("If-Modified-Since", msg.cacheObj.Headers.Get("Date"))
+		}
+		// do request
 		httpClient := &http.Client{}
 		httpClient.Timeout = 30 * time.Second
-		reqURI := req.RequestURI // URI will have to be restored before caching because it's used to compute cache key
-		req.RequestURI = ""      // it is required by library that RequestURI is not set
-		resp, err := httpClient.Do(&req)
+		reqURI := msg.req.RequestURI // URI will have to be restored before caching because it's used to compute cache key
+		msg.req.RequestURI = ""      // it is required by library that RequestURI is not set
+		resp, err := httpClient.Do(&msg.req)
 		if err != nil {
 			log.Println("Error making HTTP request:", err)
 			continue
 		}
-		req.RequestURI = reqURI // restore URI before caching because it's used to compute cache key
+		// process response
+		msg.req.RequestURI = reqURI // restore URI before caching because it's used to compute cache key
 		if resp.StatusCode == http.StatusNotModified {
-			updateChan <- cacheReqResp{cacheObj: cacheObjType{Headers: resp.Header.Clone()}, req: req}
+			updateChan <- cacheReqResp{cacheObj: cacheObjType{Headers: resp.Header.Clone()}, req: msg.req}
 		} else {
-			set(&req, resp, &stopWatches{}, srcRevalidate)
+			set(&msg.req, resp, &stopWatches{}, srcRevalidate)
 		}
 		resp.Body.Close()
 	}
