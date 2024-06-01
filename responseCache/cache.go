@@ -304,7 +304,7 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 		return
 	}
 	cacheControl := splitHeader(&resp.Header, "Cache-Control", ",")
-	if resp.Header.Get("Set-Cookie") != "" && !MapHasKey(cacheControl, "public") {
+	if resp.Header.Get("Set-Cookie") != "" && !MapHasKey(cacheControl, "public") && !MapHasKey(cacheControl, "s-maxage") {
 		logStatus = "UC_SETCOOKIE"
 		return
 	}
