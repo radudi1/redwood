@@ -381,6 +381,8 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 }
 
 func setWorker(redisConn *redis.Client) {
+	pipeFreeSlots := config.Redis.MaxPipelineLen
+	redisPipe := redisConn.Pipeline()
 	workerId := int64(-1)
 	for {
 
@@ -408,13 +410,7 @@ func setWorker(redisConn *redis.Client) {
 				cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_SERERR", "", &stats)
 				continue
 			}
-			redisErr := cacheConn().Set(redisContext, getKey(req, ""), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
-			if redisErr != nil {
-				counters.CacheErr.Add(1)
-				log.Println(redisErr)
-				cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_CACHEERR", "", &stats)
-				continue
-			}
+			redisPipe.Set(redisContext, getKey(req, ""), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
 		}
 
 		cacheObjSer, serErr := msgpack.Marshal(cacheObj)
@@ -425,19 +421,30 @@ func setWorker(redisConn *redis.Client) {
 			continue
 		}
 		// store response with body
-		redisErr := redisConn.Set(redisContext, getKey(req, cacheObj.Headers.Get("Vary")), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
-		if redisErr != nil {
-			counters.CacheErr.Add(1)
-			log.Println(redisErr)
-			cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_CACHEERR", "", &stats)
-			continue
-		}
+		redisPipe.Set(redisContext, getKey(req, cacheObj.Headers.Get("Vary")), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
 		counters.Sets.Add(1)
+		pipeFreeSlots--
+
+		// if there are no more messages on the channel or pipeline is not "full" send the pipeline to redis and reinit
+		if len(setChan) < 1 || pipeFreeSlots < 1 {
+			redisCmdErrs, redisErr := redisPipe.Exec(redisContext)
+			if redisErr != nil {
+				for i := 0; i < len(redisCmdErrs); i++ {
+					if redisCmdErrs[i].Err() != nil {
+						counters.CacheErr.Add(1)
+						log.Println(redisCmdErrs[i].String())
+					}
+				}
+			}
+			pipeFreeSlots = config.Redis.MaxPipelineLen
+		}
 
 	}
 }
 
 func updateTtlWorker(redisConn *redis.Client) {
+	pipeFreeSlots := config.Redis.MaxPipelineLen
+	redisPipe := redisConn.Pipeline()
 	workerId := int64(-1)
 	for {
 		if config.Workers.PrioritiesEnabled && workerId >= 0 {
@@ -458,20 +465,25 @@ func updateTtlWorker(redisConn *redis.Client) {
 			continue
 		}
 		cacheKey := getKey(req, "")
-		redisErr := redisConn.Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second).Err()
-		if redisErr != nil {
-			counters.CacheErr.Add(1)
-			log.Println("Could not update TTL for key ", cacheKey, " to ", time.Duration(maxAge)*time.Second, " seconds")
-		}
+		redisPipe.Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second).Err()
 		if respHeaders.Get("Vary") != "" {
 			cacheKey := getKey(req, respHeaders.Get("Vary"))
-			redisErr := redisConn.Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second).Err()
-			if redisErr != nil {
-				counters.CacheErr.Add(1)
-				log.Println("Could not update TTL for key ", cacheKey, " to ", time.Duration(maxAge)*time.Second, " seconds")
-			}
+			redisPipe.Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second).Err()
 		}
 		counters.Updates.Add(1)
+		pipeFreeSlots--
+		if len(updateChan) < 1 || pipeFreeSlots < 1 {
+			redisCmdErrs, redisErr := redisPipe.Exec(redisContext)
+			if redisErr != nil {
+				for i := 0; i < len(redisCmdErrs); i++ {
+					if redisCmdErrs[i].Err() != nil {
+						counters.CacheErr.Add(1)
+						log.Println(redisCmdErrs[i].String())
+					}
+				}
+			}
+			pipeFreeSlots = config.Redis.MaxPipelineLen
+		}
 	}
 }
 

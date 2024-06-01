@@ -37,6 +37,14 @@ DBNum = 0
 # If set to 0 there will be no limit
 MaxNumConn = 0
 
+# Redis set/update commands are pipelined
+# This should decrease Redis load and improve performance
+# This setting sets the maximum number of Redis commands that can be pipelined into a single Redis query
+# Pipelines (and this setting) are per worker (set or update)
+# Greater values should increase performance and decrease Redis load but it may increase latency (from Redwood to Redis)
+# and possibly produce load spikes on Redis
+MaxPipelineLen = 1024
+
 
 [Log]
 
