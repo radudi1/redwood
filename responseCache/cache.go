@@ -154,22 +154,13 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 	respMaxAge, maxAgeErr := getMaxAge(respCacheControl, &cacheObj.Headers, false)
 	respAge := getResponseAge(&cacheObj.Headers)
 	cacheObjInfo.IsStale = maxAgeErr != nil || respMaxAge < respAge
-	// check if cache object is stale and act accordingly
-	if cacheObjInfo.IsStale {
-		// check if ServeStale is enabled and act accordingly
-		if !config.StandardViolations.EnableStandardViolations || !config.StandardViolations.ServeStale {
-			// check if we have stale-while-revalidate and we object is fresh enough for it
-			maxStaleAge, _ := MapElemToI(cacheControl, "stale-while-revalidate")
-			if maxStaleAge < respAge {
-				return
-			}
-		}
-		// stale-while-revalidate allows us to still use cached obj or ServeStale is enabled
-		revalidateChan <- cacheReqResp{
-			req: *req.Clone(redisContext),
-			cacheObj: cacheObjType{
-				Headers: cacheObj.Headers.Clone(),
-			},
+	// check if cache object and ServeStale is not enabled - we can then use stale-while-revalidate
+	// otherwise we always server stale
+	if cacheObjInfo.IsStale && (!config.StandardViolations.EnableStandardViolations || !config.StandardViolations.ServeStale) {
+		// check if we have stale-while-revalidate and the object is fresh enough for it
+		maxStaleAge, _ := MapElemToI(cacheControl, "stale-while-revalidate")
+		if maxStaleAge < respAge {
+			return
 		}
 	}
 
@@ -530,8 +521,20 @@ func sendHeaders(w http.ResponseWriter, respHeaders http.Header, req *http.Reque
 	if req != nil {
 		cacheLog(req, cacheObjInfo.StatusCode, respHeaders, cacheObjInfo.Status, cacheObjInfo.CacheKey, stats)
 	}
-	if !cacheObjInfo.IsStale { // if it's stale revalidation will kick in and it will update ttl
-		updateChan <- cacheReqResp{cacheObj: cacheObjType{Headers: respHeaders.Clone()}, req: *req}
+	if cacheObjInfo.IsStale { // if it's stale revalidate
+		revalidateChan <- cacheReqResp{
+			req: *req.Clone(redisContext),
+			cacheObj: cacheObjType{
+				Headers: respHeaders.Clone(),
+			},
+		}
+	} else { // if not stale update ttl
+		updateChan <- cacheReqResp{
+			req: *req.Clone(redisContext),
+			cacheObj: cacheObjType{
+				Headers: respHeaders.Clone(),
+			},
+		}
 	}
 }
 
