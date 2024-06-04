@@ -28,6 +28,7 @@ type CacheConfig struct {
 	AgeDivisor             int
 	RestrictedMaxAge       int
 	RestrictedMimePrefixes []string
+	AutoAddToNoBump        bool
 }
 
 type LogConfig struct {

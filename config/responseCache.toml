@@ -23,6 +23,11 @@ BrotliLevel = 1
 GZIPLevel = 1
 DeflateLevel = 1
 
+# If set to true it will enable a mechanism which tries to detect servers (such as cloudlfare) that have problems with bumping (mitm interception)
+# If such a problem is detected the domain will be added to noBump list
+# Future connections to that domain will not be decrypted by Redwood and they will not be cached
+AutoAddToNoBump = false
+
 
 [Redis]
 
