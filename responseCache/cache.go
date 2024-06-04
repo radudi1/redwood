@@ -283,7 +283,7 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 		return
 	}
 	// if it's a cloudflare damned domain that has stupid protection (eg: ja3) we add it to nobump domain list so that future requests pass unbumped and allow user to access it properly - stupid stupid but what elese is there to do
-	if resp.StatusCode == 403 && resp.Header.Get("server") == "cloudflare" {
+	if config.Cache.AutoAddToNoBump && resp.StatusCode == 403 && resp.Header.Get("server") == "cloudflare" {
 		noBumpDomains[req.Host] = struct{}{}
 		cacheConn().SAdd(redisContext, noBumpDomainsKey, req.Host)
 		logStatus = "UC_TONOBUMP"
