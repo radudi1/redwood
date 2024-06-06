@@ -73,6 +73,15 @@ var cacheableStatusCodes = [...]int{
 	308, // permanent redirect
 }
 
+var uncacheableCacheControlDirectives = [...]string{
+	"no-cache",
+	"no-store",
+	"private",
+	"must-revalidate",
+	"proxy-revalidate",
+	"must-understand",
+}
+
 var counters Counters
 var setChan chan cacheReqResp
 var updateChan chan cacheReqResp
@@ -121,7 +130,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 		return
 	}
 	cacheControl := splitHeader(&req.Header, "Cache-Control", ",")
-	if MapHasKey(cacheControl, "no-cache") || MapHasKey(cacheControl, "no-store") || MapHasKey(cacheControl, "must-revalidate") || cacheControl["max-age"] == "0" {
+	if MapHasAnyKey(cacheControl, uncacheableCacheControlDirectives[:]) || cacheControl["max-age"] == "0" {
 		return
 	}
 
@@ -312,7 +321,7 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 		logStatus = "UC_SETCOOKIE"
 		return
 	}
-	if MapHasKey(cacheControl, "private") || MapHasKey(cacheControl, "no-cache") || MapHasKey(cacheControl, "no-store") || cacheControl["max-age"] == "0" {
+	if MapHasAnyKey(cacheControl, uncacheableCacheControlDirectives[:]) || cacheControl["max-age"] == "0" {
 		// if dangerous heuristics are not enabled we can't cache it
 		if !config.StandardViolations.EnableStandardViolations || !config.StandardViolations.EnableDangerousHeuristics {
 			logStatus = "UC_CACHECTRL"

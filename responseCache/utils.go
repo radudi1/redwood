@@ -106,6 +106,24 @@ func MapHasKey[V any](haystack map[string]V, needle string) bool {
 	return hasKey
 }
 
+func MapHasAnyKey[V any](haystack map[string]V, needles []string) bool {
+	for _, needle := range needles {
+		if MapHasKey(haystack, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func MapHasAllKeys[V any](haystack map[string]V, needles []string) bool {
+	for _, needle := range needles {
+		if !MapHasKey(haystack, needle) {
+			return false
+		}
+	}
+	return true
+}
+
 func MapElemToI(m map[string]string, key string) (val int, noerr bool) {
 	strV, mapErr := m[key]
 	if !mapErr {
