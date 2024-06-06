@@ -40,6 +40,7 @@ type LogConfig struct {
 type WorkersConfig struct {
 	CacheSetNumWorkers    int
 	CacheUpdateNumWorkers int
+	RevalidateNumWorkers  int
 	WorkerBufferSize      int
 	PrioritiesEnabled     bool
 }
@@ -47,7 +48,6 @@ type WorkersConfig struct {
 type StandardViolationsConfig struct {
 	EnableStandardViolations   bool
 	ServeStale                 bool
-	RevalidateNumWorkers       int
 	OverrideSMaxAge            bool
 	OverrideExpire             bool
 	OverrideCacheControl       bool
