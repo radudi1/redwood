@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -76,6 +77,8 @@ var counters Counters
 var setChan chan cacheReqResp
 var updateChan chan cacheReqResp
 var revalidateChan chan cacheReqResp
+var revalidateReqs map[string]struct{}
+var revalidateReqsMutex sync.Mutex
 
 func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatches) {
 
@@ -153,13 +156,14 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 	respCacheControl := splitHeader(&cacheObj.Headers, "Cache-Control", ",")
 	respMaxAge, maxAgeErr := getMaxAge(respCacheControl, &cacheObj.Headers, false)
 	respAge := getResponseAge(&cacheObj.Headers)
-	cacheObjInfo.IsStale = maxAgeErr != nil || respMaxAge < respAge
-	// check if cache object and ServeStale is not enabled - we can then use stale-while-revalidate
-	// otherwise we always server stale
-	if cacheObjInfo.IsStale && (!config.StandardViolations.EnableStandardViolations || !config.StandardViolations.ServeStale) {
+	cacheObjInfo.IsStale = maxAgeErr != nil || respAge > respMaxAge
+	// check if cached object is stale and ServeStale is not enabled - we can then use stale-while-revalidate
+	// if ServeStale is enabled we always server stale
+	// all this only if we have revalidation workers - otherwise we can't revalidate and we don't serve stale at all
+	if cacheObjInfo.IsStale && (!config.StandardViolations.EnableStandardViolations || !config.StandardViolations.ServeStale) && config.Workers.RevalidateNumWorkers > 0 {
 		// check if we have stale-while-revalidate and the object is fresh enough for it
 		maxStaleAge, _ := MapElemToI(cacheControl, "stale-while-revalidate")
-		if maxStaleAge < respAge {
+		if respAge > respMaxAge+maxStaleAge { // cached object is stale and we also passed stale-while-revalidate window - we can't serve
 			return
 		}
 	}
@@ -497,6 +501,17 @@ func revalidateWorker() {
 		if config.Workers.PrioritiesEnabled {
 			workerId = prioworkers.WorkStart(revalidateWPrio)
 		}
+		// if this is request is currently revalidating (by another goroutine) we skip it
+		cacheKey := getKey(&msg.req, msg.cacheObj.Headers.Get("Vary"))
+		revalidateReqsMutex.Lock()
+		if MapHasKey(revalidateReqs, cacheKey) {
+			revalidateReqsMutex.Unlock()
+			continue
+		}
+		// add current request to currently revalidating list
+		revalidateReqs[cacheKey] = struct{}{}
+		revalidateReqsMutex.Unlock()
+		// update stats
 		counters.Revalidations.Add(1)
 		// conditional validation if possible
 		if msg.cacheObj.Headers.Get("ETag") != "" {
@@ -522,6 +537,10 @@ func revalidateWorker() {
 			set(&msg.req, resp, &stopWatches{}, srcRevalidate)
 		}
 		resp.Body.Close()
+		// remove request from currently revalidating list
+		revalidateReqsMutex.Lock()
+		delete(revalidateReqs, cacheKey)
+		revalidateReqsMutex.Unlock()
 	}
 }
 
@@ -534,11 +553,13 @@ func sendHeaders(w http.ResponseWriter, respHeaders http.Header, req *http.Reque
 		cacheLog(req, cacheObjInfo.StatusCode, respHeaders, cacheObjInfo.Status, cacheObjInfo.CacheKey, stats)
 	}
 	if cacheObjInfo.IsStale { // if it's stale revalidate
-		revalidateChan <- cacheReqResp{
-			req: *req.Clone(redisContext),
-			cacheObj: cacheObjType{
-				Headers: respHeaders.Clone(),
-			},
+		if config.Workers.RevalidateNumWorkers > 0 {
+			revalidateChan <- cacheReqResp{
+				req: *req.Clone(redisContext),
+				cacheObj: cacheObjType{
+					Headers: respHeaders.Clone(),
+				},
+			}
 		}
 	} else { // if not stale update ttl
 		updateChan <- cacheReqResp{

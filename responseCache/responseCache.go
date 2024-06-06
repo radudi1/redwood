@@ -78,12 +78,10 @@ func Init() {
 	}
 
 	// spin up revalidate workers
-	if config.StandardViolations.EnableStandardViolations && config.StandardViolations.ServeStale {
+	if config.Workers.RevalidateNumWorkers > 0 {
 		revalidateChan = make(chan cacheReqResp, config.Workers.WorkerBufferSize)
-		if config.StandardViolations.RevalidateNumWorkers < 1 {
-			config.StandardViolations.RevalidateNumWorkers = 1
-		}
-		for i := 0; i < config.StandardViolations.RevalidateNumWorkers; i++ {
+		revalidateReqs = make(map[string]struct{})
+		for i := 0; i < config.Workers.RevalidateNumWorkers; i++ {
 			go revalidateWorker()
 		}
 	}

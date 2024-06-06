@@ -72,6 +72,13 @@ CacheSetNumWorkers = 1
 # This is done with this many threads
 CacheUpdateNumWorkers = 1
 
+# When we have headers like stale-while-revalidate we revalidate cached items according to standard
+# Also if ServeStale is set to true then stale responses will be served from cache
+# and the original request will be revalidated in background from the origin http server
+# Revalidation is done by separate workers. Their number is set by RevalidateNumWorkers
+# If set to 0 revalidation will be disabled
+RevalidateNumWorkers = 16
+
 # Communication from main processing to cache writing threads is buffered.
 # Choose a big enough buffer so that main processing is not blocked by cache writing threads
 WorkerBufferSize = 32768
@@ -95,12 +102,9 @@ PrioritiesEnabled = false
 # If enabled it will already enable some minor standard violations which should be more or less safe
 EnableStandardViolations = false
 
-# If ServeStale is set to true then stale responses will be served from cache
-# and the original request will be revalidated in background from the origin http server
-# Revalidation is done by separate workers. Their number is set by RevalidateNumWorkers
+# If ServeStale is enabled stale responses will be served from cache and revalidation will kick in (in background)
+# Make sure that you set RevalidateNumWorkers to something greater than 0
 ServerStale = false
-RevalidateNumWorkers = 16
-
 
 # According to standard s-maxage specifically sets intermediate cache ttls (redwood)
 # But often times this is set too low compared to maxage
