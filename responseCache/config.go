@@ -41,11 +41,8 @@ type LogConfig struct {
 }
 
 type WorkersConfig struct {
-	CacheSetNumWorkers    int
-	CacheUpdateNumWorkers int
-	RevalidateNumWorkers  int
-	WorkerBufferSize      int
-	PrioritiesEnabled     bool
+	PrioritiesEnabled bool
+	MaxBlockedWorkers int
 }
 
 type StandardViolationsConfig struct {

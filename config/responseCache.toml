@@ -74,30 +74,21 @@ LogBufferSize = 4096
 
 [Workers]
 
-# The actual writing to cache is done in this many threads
-CacheSetNumWorkers = 1
-
-# When an already cached item is fetched from cache we update (increase) the cache ttl
-# This is done with this many threads
-CacheUpdateNumWorkers = 1
-
-# When we have headers like stale-while-revalidate we revalidate cached items according to standard
-# Also if ServeStale is set to true then stale responses will be served from cache
-# and the original request will be revalidated in background from the origin http server
-# Revalidation is done by separate workers. Their number is set by RevalidateNumWorkers
-# If set to 0 revalidation will be disabled
-RevalidateNumWorkers = 16
-
-# Communication from main processing to cache writing threads is buffered.
-# Choose a big enough buffer so that main processing is not blocked by cache writing threads
-WorkerBufferSize = 32768
-
 # Writing threads are priorised lower than client threads (http requests)
 # This should slightly improve response time to client because cache writing is done in background only when no more clients are waiting for results
 # But if you have a very busy server with no idle times (there's always at least one client waiting for response)
 # then priorities don't make sends. In this scenario it will eventually behave like no priorities at all but with increased delay and overhead
 # Therefore this setting disables priorities and all workers (http clients or cache writers) are given equal opportunity
 PrioritiesEnabled = false
+
+# When priorities are enabled lower priority tasks (eg: set, update ttl) will wait until all higher priority tasks finish (eg: get)
+# For a busy server this could delay lower priority takss indefinitely
+# This setting sets a limit for how many low priority tasks may wait
+# When a this limit is reached a low priority task (random) will be allowed to execute regardless of whether higher priority tasks are still running
+# Low priority tasks will still be delayed by they will eventually be executed even when high priority takss are running all the time
+# Set lower values for lower delays and higher values if you know that there are idle times in client requests coming in and delays are acceptable
+# Consider disabling priorities altogether if you have a very busy server
+MaxBlockedWorkers = 1024
 
 
 # All settings in StandardViolations violate http standards for improved cacheability
