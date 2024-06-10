@@ -63,6 +63,16 @@ func Init() {
 
 	bumpInit()
 
+	// init httpClient (needed for revalidations)
+	defaultTransport := http.DefaultTransport.(*http.Transport).Clone()
+	defaultTransport.MaxConnsPerHost = 0
+	defaultTransport.MaxIdleConns = 0
+	defaultTransport.MaxIdleConnsPerHost = 0
+	httpClient = &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: defaultTransport,
+	}
+
 	// init prioworkers
 	if config.Workers.PrioritiesEnabled {
 		prioworkers.Init(&prioworkers.PrioworkersOptions{
