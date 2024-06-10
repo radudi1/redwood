@@ -82,6 +82,8 @@ var (
 	revalidateReqsMutex sync.Mutex
 
 	getPipe, setPipe, updatePipe *RedisPipeline
+
+	httpClient *http.Client
 )
 
 func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatches) {
@@ -170,10 +172,10 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 	respCacheControl := splitHeader(cacheObj.Headers, "Cache-Control", ",")
 	respMaxAge, maxAgeErr := getMaxAge(respCacheControl, cacheObj.Headers, false)
 	respAge := getResponseAge(cacheObj.Headers)
+	fmt.Println(req.URL, maxAgeErr, respAge, respMaxAge)
 	cacheObjInfo.IsStale = maxAgeErr != nil || respAge > respMaxAge
 	// check if cached object is stale and ServeStale is not enabled - we can then use stale-while-revalidate
 	// if ServeStale is enabled we always server stale
-	// all this only if we have revalidation workers - otherwise we can't revalidate and we don't serve stale at all
 	if cacheObjInfo.IsStale && (!config.StandardViolations.EnableStandardViolations || !config.StandardViolations.ServeStale) {
 		// check if we have stale-while-revalidate and the object is fresh enough for it
 		maxStaleAge, _ := MapElemToI(cacheControl, "stale-while-revalidate")
@@ -526,8 +528,6 @@ func revalidateWorker(req *http.Request, respHeaders http.Header) {
 		req.Body.Close()
 		req.Body = nil
 	}
-	httpClient := &http.Client{}
-	httpClient.Timeout = 30 * time.Second
 	reqURI := req.RequestURI // URI will have to be restored before caching because it's used to compute cache key
 	req.RequestURI = ""      // it is required by library that RequestURI is not set
 	resp, err := httpClient.Do(req)
