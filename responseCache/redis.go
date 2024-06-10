@@ -41,7 +41,7 @@ type RedisPipeline struct {
 	maxLen    int
 	deadline  time.Duration
 	redisPipe redis.Pipeliner
-	cmdChan   chan RedisPipelineCmd
+	cmdChan   chan *RedisPipelineCmd
 	ticker    *time.Ticker
 	counters  RedisPipelineCounters
 }
@@ -80,7 +80,7 @@ func NewRedisPipeline(ctx context.Context, maxPipeLen int, pipeDeadline time.Dur
 		maxLen:    maxPipeLen,
 		deadline:  pipeDeadline,
 		redisPipe: redisConn.Pipeline(),
-		cmdChan:   make(chan RedisPipelineCmd, maxPipeLen),
+		cmdChan:   make(chan *RedisPipelineCmd, maxPipeLen),
 	}
 	go pipe.redisPipelineGather()
 	return pipe
@@ -111,7 +111,7 @@ func (pipe *RedisPipeline) Cmd(ctx context.Context, cmd string, key string, val 
 		valChan:  make(chan interface{}, 1),
 		errChan:  make(chan error, 1),
 	}
-	pipe.cmdChan <- pipeCmd
+	pipe.cmdChan <- &pipeCmd
 	retval = <-pipeCmd.valChan
 	close(pipeCmd.valChan)
 	err = <-pipeCmd.errChan
@@ -133,41 +133,51 @@ func (pipe *RedisPipeline) GetStats() RedisPipelineStats {
 }
 
 func (pipe *RedisPipeline) redisPipelineGather() {
+
+	// init
 	pipe.counters.iterations.Add(1)
 	cmdMap := make(map[interface{}]*RedisPipelineCmd)
+	var cmd *RedisPipelineCmd
 	var cmdId interface{}
 	pipeLen := 0
+
+	// get first command - until then we don't need to do anything
+	cmd = <-pipe.cmdChan
 	pipe.ticker = time.NewTicker(pipe.deadline)
+
+	// loop fo gathering additional commands
 	for {
-		select {
-		case cmd := <-pipe.cmdChan:
-			pipeLen++
-			switch cmd.redisCmd {
-			case "get":
-				cmdId = pipe.redisPipe.Get(cmd.ctx, cmd.key)
-			case "set":
-				cmdId = pipe.redisPipe.Set(cmd.ctx, cmd.key, cmd.val, cmd.ttl)
-			case "expire":
-				cmdId = pipe.redisPipe.Expire(cmd.ctx, cmd.key, cmd.ttl)
-			default:
-				panic("Redis command " + cmd.redisCmd + " currently not supported by our redis pipeline")
-			}
-			// add the new command to map
-			cmdMap[cmdId] = &cmd
-			// if we reach maximum pipe length we execute pipe and exit - current pipe is finished
-			if pipeLen >= pipe.maxLen {
-				pipe.redisPipelineExec(cmdMap)
-				return
-			}
-		case <-pipe.ticker.C: // deadline reached
-			// if there's at least one command in pipe we execute the pipe and exit - current pipe is finished
-			// if there are no commands in queue there's nothing to send to redis and we can continue with a new cycle
-			if pipeLen > 0 {
-				pipe.redisPipelineExec(cmdMap)
-				return
-			}
+
+		// process command
+		pipeLen++
+		switch cmd.redisCmd {
+		case "get":
+			cmdId = pipe.redisPipe.Get(cmd.ctx, cmd.key)
+		case "set":
+			cmdId = pipe.redisPipe.Set(cmd.ctx, cmd.key, cmd.val, cmd.ttl)
+		case "expire":
+			cmdId = pipe.redisPipe.Expire(cmd.ctx, cmd.key, cmd.ttl)
+		default:
+			panic("Redis command " + cmd.redisCmd + " currently not supported by our redis pipeline")
 		}
+		// add the new command to map
+		cmdMap[cmdId] = cmd
+		// if we reach maximum pipe length we execute pipe and exit - current pipe is finished
+		if pipeLen >= pipe.maxLen {
+			pipe.redisPipelineExec(cmdMap)
+			return
+		}
+
+		// wait for additional commands or ticker signal
+		select {
+		case cmd = <-pipe.cmdChan:
+		case <-pipe.ticker.C: // deadline reached
+			pipe.redisPipelineExec(cmdMap)
+			return
+		}
+
 	}
+
 }
 
 // redisPipelineExec sends current pipe to redis, creates a new pipe for future commands and does current pipe cleanup
@@ -186,7 +196,7 @@ func (pipe *RedisPipeline) redisPipelineExec(cmdMap map[interface{}]*RedisPipeli
 	}
 	// send pipe to redis
 	_, err := curRedisPipe.Exec(pipe.context)
-	if err != nil {
+	if err != nil && err != redis.Nil {
 		for _, cmd := range cmdMap {
 			cmd.valChan <- ""
 			cmd.errChan <- err
