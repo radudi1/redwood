@@ -46,7 +46,20 @@ func Init() {
 		go cacheLogWorker(config.Log.RevalidateLogFile, revalidateLogChan)
 	}
 
-	redisInit()
+	RedisInit()
+
+	// create redis pipelines
+	if config.Redis.MaxPipelineLen > 0 {
+		if config.Redis.GetPipelineDeadlineUS > 0 {
+			getPipe = NewRedisPipeline(redisContext, config.Redis.MaxPipelineLen, time.Duration(config.Redis.GetPipelineDeadlineUS*1000))
+		}
+		if config.Redis.SetPipelineDeadlineUS > 0 {
+			setPipe = NewRedisPipeline(redisContext, config.Redis.MaxPipelineLen, time.Duration(config.Redis.SetPipelineDeadlineUS*1000))
+		}
+		if config.Redis.UpdatePipelineDeadlineUS > 0 {
+			updatePipe = NewRedisPipeline(redisContext, config.Redis.MaxPipelineLen, time.Duration(config.Redis.UpdatePipelineDeadlineUS*1000))
+		}
+	}
 
 	bumpInit()
 
@@ -65,7 +78,7 @@ func Init() {
 		config.Workers.CacheSetNumWorkers = 1
 	}
 	for i := 0; i < config.Workers.CacheSetNumWorkers; i++ {
-		go setWorker(redisConn)
+		go setWorker()
 	}
 
 	// spin up cache update workers
@@ -74,7 +87,7 @@ func Init() {
 		config.Workers.CacheUpdateNumWorkers = 1
 	}
 	for i := 0; i < config.Workers.CacheUpdateNumWorkers; i++ {
-		go updateTtlWorker(redisConn)
+		go updateTtlWorker()
 	}
 
 	// spin up revalidate workers
@@ -158,6 +171,22 @@ func signalHandler(c chan os.Signal) {
 		fmt.Println("Revalidate queue length: ", len(revalidateChan))
 		// prioworkers state
 		fmt.Printf("%+v\n", prioworkers.GetState())
+		// pipeline stats
+		if getPipe != nil {
+			stats := getPipe.GetStats()
+			fmt.Println("GET Pipe Stats:")
+			fmt.Println("\tCmds per iteration: ", stats.AvgNumCmds, " avg, ", stats.MaxNumCmds, " max")
+		}
+		if setPipe != nil {
+			stats := setPipe.GetStats()
+			fmt.Println("SET Pipe Stats:")
+			fmt.Println("\tCmds per iteration: ", stats.AvgNumCmds, " avg, ", stats.MaxNumCmds, " max")
+		}
+		if updatePipe != nil {
+			stats := updatePipe.GetStats()
+			fmt.Println("UPDATE Pipe Stats:")
+			fmt.Println("\tCmds per iteration: ", stats.AvgNumCmds, " avg, ", stats.MaxNumCmds, " max")
+		}
 		// byte counters
 		fmt.Printf("Hit MB: %d\n", counters.HitBytes.Load()/1024/1024)
 		fmt.Printf("Miss MB: %d\n", counters.MissBytes.Load()/1024/1024)

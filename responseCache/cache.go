@@ -82,12 +82,19 @@ var uncacheableCacheControlDirectives = [...]string{
 	"must-understand",
 }
 
-var counters Counters
-var setChan chan cacheReqResp
-var updateChan chan cacheReqResp
-var revalidateChan chan cacheReqResp
-var revalidateReqs map[string]struct{}
-var revalidateReqsMutex sync.Mutex
+var (
+	counters Counters
+
+	setChan chan cacheReqResp
+
+	updateChan chan cacheReqResp
+
+	revalidateChan      chan cacheReqResp
+	revalidateReqs      map[string]struct{}
+	revalidateReqsMutex sync.Mutex
+
+	getPipe, setPipe, updatePipe *RedisPipeline
+)
 
 func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatches) {
 
@@ -112,7 +119,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 		defer prioworkers.WorkEnd(workerId)
 	}
 
-	cacheObjInfo.CacheKey = getKey(req, "")
+	cacheObjInfo.CacheKey = GetKey(req, "")
 
 	// send headers and update stats on function return
 	defer (func() {
@@ -135,7 +142,13 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 	}
 
 	// try to serve from cache
-	cacheObjSer, redisErr := cacheConn().Get(redisContext, cacheObjInfo.CacheKey).Result()
+	var cacheObjSer string
+	var redisErr error
+	if config.Redis.MaxPipelineLen < 1 || config.Redis.GetPipelineDeadlineUS < 1 {
+		cacheObjSer, redisErr = CacheConn().Get(redisContext, cacheObjInfo.CacheKey).Result()
+	} else {
+		cacheObjSer, redisErr = getPipe.Get(redisContext, cacheObjInfo.CacheKey)
+	}
 	if redisErr == redis.Nil {
 		return
 	}
@@ -148,8 +161,12 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 	// check if this is the real response or just the dummy one used for vary
 	if cacheObj.Headers.Get("Vary") != "" {
 		// we have a vary header so we fetch the real response according to vary
-		cacheObjInfo.CacheKey = getKey(req, cacheObj.Headers.Get("Vary"))
-		cacheObjSer, redisErr := cacheConn().Get(redisContext, cacheObjInfo.CacheKey).Result()
+		cacheObjInfo.CacheKey = GetKey(req, cacheObj.Headers.Get("Vary"))
+		if config.Redis.MaxPipelineLen < 1 || config.Redis.GetPipelineDeadlineUS < 1 {
+			cacheObjSer, redisErr = CacheConn().Get(redisContext, cacheObjInfo.CacheKey).Result()
+		} else {
+			cacheObjSer, redisErr = getPipe.Get(redisContext, cacheObjInfo.CacheKey)
+		}
 		if redisErr == redis.Nil {
 			return
 		}
@@ -262,11 +279,11 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 	switch reqSrc {
 	case srcClient:
 		defer func() {
-			cacheLog(req, resp.StatusCode, resp.Header, logStatus, getKey(req, resp.Header.Get("Vary")), stats)
+			cacheLog(req, resp.StatusCode, resp.Header, logStatus, GetKey(req, resp.Header.Get("Vary")), stats)
 		}()
 	case srcRevalidate:
 		defer func() {
-			revalidateLog(req, resp.StatusCode, resp.Header, logStatus, getKey(req, resp.Header.Get("Vary")), stats)
+			revalidateLog(req, resp.StatusCode, resp.Header, logStatus, GetKey(req, resp.Header.Get("Vary")), stats)
 		}()
 	default:
 		panic("Invalid request source received for responsecache set")
@@ -298,7 +315,7 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 	// if it's a cloudflare damned domain that has stupid protection (eg: ja3) we add it to nobump domain list so that future requests pass unbumped and allow user to access it properly - stupid stupid but what elese is there to do
 	if config.Cache.AutoAddToNoBump && resp.StatusCode == 403 && resp.Header.Get("server") == "cloudflare" {
 		noBumpDomains[req.Host] = struct{}{}
-		cacheConn().SAdd(redisContext, noBumpDomainsKey, req.Host)
+		CacheConn().SAdd(redisContext, noBumpDomainsKey, req.Host)
 		logStatus = "UC_TONOBUMP"
 		return
 	}
@@ -393,9 +410,7 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 
 }
 
-func setWorker(redisConn *redis.Client) {
-	pipeFreeSlots := config.Redis.MaxPipelineLen
-	redisPipe := redisConn.Pipeline()
+func setWorker() {
 	workerId := int64(-1)
 	for {
 
@@ -411,6 +426,7 @@ func setWorker(redisConn *redis.Client) {
 		req := &msg.req
 		maxAge := msg.maxAge
 		stats := msg.stats
+		var redisErr error
 
 		// if we have a vary header we store a mock response just with headers so we can get the vary header on fetch
 		if cacheObj.Headers.Get("Vary") != "" {
@@ -423,7 +439,17 @@ func setWorker(redisConn *redis.Client) {
 				cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_SERERR", "", &stats)
 				continue
 			}
-			redisPipe.Set(redisContext, getKey(req, ""), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
+			if config.Redis.MaxPipelineLen < 1 || config.Redis.SetPipelineDeadlineUS < 1 {
+				redisErr = CacheConn().Set(redisContext, GetKey(req, ""), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
+			} else {
+				redisErr = setPipe.Set(redisContext, GetKey(req, ""), string(cacheObjSer), time.Duration(maxAge)*time.Second)
+			}
+			if redisErr != nil {
+				counters.CacheErr.Add(1)
+				log.Println("Redis set error ", redisErr)
+				cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_SETERR", "", &stats)
+				continue
+			}
 		}
 
 		cacheObjSer, serErr := msgpack.Marshal(cacheObj)
@@ -434,30 +460,23 @@ func setWorker(redisConn *redis.Client) {
 			continue
 		}
 		// store response with body
-		redisPipe.Set(redisContext, getKey(req, cacheObj.Headers.Get("Vary")), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
-		counters.Sets.Add(1)
-		pipeFreeSlots--
-
-		// if there are no more messages on the channel or pipeline is not "full" send the pipeline to redis and reinit
-		if len(setChan) < 1 || pipeFreeSlots < 1 {
-			redisCmdErrs, redisErr := redisPipe.Exec(redisContext)
-			if redisErr != nil {
-				for i := 0; i < len(redisCmdErrs); i++ {
-					if redisCmdErrs[i].Err() != nil {
-						counters.CacheErr.Add(1)
-						log.Println(redisCmdErrs[i].String())
-					}
-				}
-			}
-			pipeFreeSlots = config.Redis.MaxPipelineLen
+		if config.Redis.MaxPipelineLen < 1 || config.Redis.SetPipelineDeadlineUS < 1 {
+			redisErr = CacheConn().Set(redisContext, GetKey(req, cacheObj.Headers.Get("Vary")), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
+		} else {
+			redisErr = setPipe.Set(redisContext, GetKey(req, cacheObj.Headers.Get("Vary")), string(cacheObjSer), time.Duration(maxAge)*time.Second)
 		}
+		if redisErr != nil {
+			counters.CacheErr.Add(1)
+			log.Println("Redis set error ", redisErr)
+			cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_SETERR", "", &stats)
+			continue
+		}
+		counters.Sets.Add(1)
 
 	}
 }
 
-func updateTtlWorker(redisConn *redis.Client) {
-	pipeFreeSlots := config.Redis.MaxPipelineLen
-	redisPipe := redisConn.Pipeline()
+func updateTtlWorker() {
 	workerId := int64(-1)
 	for {
 		if config.Workers.PrioritiesEnabled && workerId >= 0 {
@@ -477,26 +496,32 @@ func updateTtlWorker(redisConn *redis.Client) {
 		if err != nil {
 			continue
 		}
-		cacheKey := getKey(req, "")
-		redisPipe.Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second).Err()
+		cacheKey := GetKey(req, "")
+		var redisErr error
+		if config.Redis.MaxPipelineLen < 1 || config.Redis.UpdatePipelineDeadlineUS < 1 {
+			redisErr = CacheConn().Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second).Err()
+		} else {
+			redisErr = updatePipe.Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second)
+		}
+		if redisErr != nil {
+			counters.CacheErr.Add(1)
+			log.Println("Redis update error ", redisErr)
+			continue
+		}
 		if respHeaders.Get("Vary") != "" {
-			cacheKey := getKey(req, respHeaders.Get("Vary"))
-			redisPipe.Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second).Err()
+			cacheKey := GetKey(req, respHeaders.Get("Vary"))
+			if config.Redis.MaxPipelineLen < 1 || config.Redis.UpdatePipelineDeadlineUS < 1 {
+				redisErr = CacheConn().Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second).Err()
+			} else {
+				redisErr = updatePipe.Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second)
+			}
+			if redisErr != nil {
+				counters.CacheErr.Add(1)
+				log.Println("Redis update error ", redisErr)
+				continue
+			}
 		}
 		counters.Updates.Add(1)
-		pipeFreeSlots--
-		if len(updateChan) < 1 || pipeFreeSlots < 1 {
-			redisCmdErrs, redisErr := redisPipe.Exec(redisContext)
-			if redisErr != nil {
-				for i := 0; i < len(redisCmdErrs); i++ {
-					if redisCmdErrs[i].Err() != nil {
-						counters.CacheErr.Add(1)
-						log.Println(redisCmdErrs[i].String())
-					}
-				}
-			}
-			pipeFreeSlots = config.Redis.MaxPipelineLen
-		}
 	}
 }
 
@@ -511,7 +536,7 @@ func revalidateWorker() {
 			workerId = prioworkers.WorkStart(revalidateWPrio)
 		}
 		// if this is request is currently revalidating (by another goroutine) we skip it
-		cacheKey := getKey(&msg.req, msg.cacheObj.Headers.Get("Vary"))
+		cacheKey := GetKey(&msg.req, msg.cacheObj.Headers.Get("Vary"))
 		revalidateReqsMutex.Lock()
 		if MapHasKey(revalidateReqs, cacheKey) {
 			revalidateReqsMutex.Unlock()
