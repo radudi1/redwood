@@ -12,7 +12,7 @@ var noBumpDomains map[string]struct{}
 // load nobump domains
 func bumpInit() {
 	if config.Cache.AutoAddToNoBump {
-		noBumpDomains, _ = cacheConn().SMembersMap(redisContext, noBumpDomainsKey).Result()
+		noBumpDomains, _ = CacheConn().SMembersMap(redisContext, noBumpDomainsKey).Result()
 	}
 }
 

@@ -12,10 +12,13 @@ const defaultConfigPath = "/etc/redwood"
 const defaultConfigFilename = "responseCache.toml"
 
 type RedisConfig struct {
-	Url            string
-	DBNum          int
-	MaxNumConn     int
-	MaxPipelineLen int
+	Url                      string
+	DBNum                    int
+	MaxNumConn               int
+	MaxPipelineLen           int
+	GetPipelineDeadlineUS    int
+	SetPipelineDeadlineUS    int
+	UpdatePipelineDeadlineUS int
 }
 
 type CacheConfig struct {
@@ -79,6 +82,6 @@ func loadConfig() {
 		}
 	}
 	if _, err := toml.DecodeFile(configFile, &config); err != nil {
-		log.Println("!!! Failed to decode config file %s: %w Response Cache DISABLED !!!", configFile, err)
+		log.Println("!!! Failed to decode config file ", configFile, ": ", err, " Response Cache DISABLED !!!")
 	}
 }
