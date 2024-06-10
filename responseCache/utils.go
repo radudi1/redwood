@@ -81,7 +81,7 @@ func reEncode(dstBuf *bytes.Buffer, content *[]byte, fromEncoding string, accept
 	return
 }
 
-func splitHeader(headers *http.Header, headerName string, delimiter string) map[string]string {
+func splitHeader(headers http.Header, headerName string, delimiter string) map[string]string {
 	res := make(map[string]string)
 	for _, hdrVal := range headers.Values(headerName) {
 		strArr := strings.Split(hdrVal, delimiter)

@@ -55,13 +55,6 @@ type cacheObjInfoType struct {
 	CacheKey   string
 }
 
-type cacheReqResp struct {
-	cacheObj cacheObjType
-	req      http.Request
-	maxAge   int
-	stats    stopWatches
-}
-
 // cacheable http response codes
 // ALWAYS ORDERED ASCENDING
 var cacheableStatusCodes = [...]int{
@@ -85,11 +78,6 @@ var uncacheableCacheControlDirectives = [...]string{
 var (
 	counters Counters
 
-	setChan chan cacheReqResp
-
-	updateChan chan cacheReqResp
-
-	revalidateChan      chan cacheReqResp
 	revalidateReqs      map[string]struct{}
 	revalidateReqsMutex sync.Mutex
 
@@ -136,7 +124,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 	if req.Method != "GET" && req.Method != "HEAD" {
 		return
 	}
-	cacheControl := splitHeader(&req.Header, "Cache-Control", ",")
+	cacheControl := splitHeader(req.Header, "Cache-Control", ",")
 	if MapHasAnyKey(cacheControl, uncacheableCacheControlDirectives[:]) || cacheControl["max-age"] == "0" {
 		return
 	}
@@ -179,14 +167,14 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 	}
 
 	// check if cached object is stale and decide what to do if it is
-	respCacheControl := splitHeader(&cacheObj.Headers, "Cache-Control", ",")
-	respMaxAge, maxAgeErr := getMaxAge(respCacheControl, &cacheObj.Headers, false)
-	respAge := getResponseAge(&cacheObj.Headers)
+	respCacheControl := splitHeader(cacheObj.Headers, "Cache-Control", ",")
+	respMaxAge, maxAgeErr := getMaxAge(respCacheControl, cacheObj.Headers, false)
+	respAge := getResponseAge(cacheObj.Headers)
 	cacheObjInfo.IsStale = maxAgeErr != nil || respAge > respMaxAge
 	// check if cached object is stale and ServeStale is not enabled - we can then use stale-while-revalidate
 	// if ServeStale is enabled we always server stale
 	// all this only if we have revalidation workers - otherwise we can't revalidate and we don't serve stale at all
-	if cacheObjInfo.IsStale && (!config.StandardViolations.EnableStandardViolations || !config.StandardViolations.ServeStale) && config.Workers.RevalidateNumWorkers > 0 {
+	if cacheObjInfo.IsStale && (!config.StandardViolations.EnableStandardViolations || !config.StandardViolations.ServeStale) {
 		// check if we have stale-while-revalidate and the object is fresh enough for it
 		maxStaleAge, _ := MapElemToI(cacheControl, "stale-while-revalidate")
 		if respAge > respMaxAge+maxStaleAge { // cached object is stale and we also passed stale-while-revalidate window - we can't serve
@@ -222,7 +210,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 	// check if body needs reencoding (compression algo not supported by client)
 	respEncoding := cacheObj.Headers.Get("Content-Encoding")
 	if respEncoding != "" {
-		acceptEncoding := splitHeader(&req.Header, "Accept-Encoding", ",")
+		acceptEncoding := splitHeader(req.Header, "Accept-Encoding", ",")
 		if !MapHasKey(acceptEncoding, respEncoding) {
 			var encodedBuf bytes.Buffer
 			encoding, reEncodeErr := reEncode(&encodedBuf, &cacheObj.Body, respEncoding, acceptEncoding)
@@ -333,7 +321,7 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 		logStatus = "UC_AUTHVARY"
 		return
 	}
-	cacheControl := splitHeader(&resp.Header, "Cache-Control", ",")
+	cacheControl := splitHeader(resp.Header, "Cache-Control", ",")
 	if resp.Header.Get("Set-Cookie") != "" && !MapHasKey(cacheControl, "public") && !MapHasKey(cacheControl, "s-maxage") {
 		logStatus = "UC_SETCOOKIE"
 		return
@@ -360,7 +348,7 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 	}
 
 	// Compute cache TTL from response
-	maxAge, err := getMaxAge(cacheControl, &resp.Header, config.StandardViolations.EnableStandardViolations)
+	maxAge, err := getMaxAge(cacheControl, resp.Header, config.StandardViolations.EnableStandardViolations)
 	if err != nil {
 		logStatus = "UC_STALE"
 		return
@@ -404,100 +392,95 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 		Body:       body,
 	}
 
-	setChan <- cacheReqResp{cacheObj: *cacheObj, req: *req.Clone(redisContext), maxAge: maxAge}
+	go setWorker(cacheObj, req, maxAge, stats)
 
 	logStatus = "MISS"
 
 }
 
-func setWorker() {
-	workerId := int64(-1)
-	for {
+func setWorker(cacheObj *cacheObjType, req *http.Request, maxAge int, stats *stopWatches) {
 
-		if config.Workers.PrioritiesEnabled && workerId >= 0 {
-			prioworkers.WorkEnd(workerId)
-		}
-		msg := <-setChan
-		if config.Workers.PrioritiesEnabled {
-			workerId = prioworkers.WorkStart(setWPrio)
-		}
+	if config.Workers.PrioritiesEnabled {
+		workerId := prioworkers.WorkStart(setWPrio)
+		defer prioworkers.WorkEnd(workerId)
+	}
 
-		cacheObj := &msg.cacheObj
-		req := &msg.req
-		maxAge := msg.maxAge
-		stats := msg.stats
-		var redisErr error
+	var redisErr error
 
-		// if we have a vary header we store a mock response just with headers so we can get the vary header on fetch
-		if cacheObj.Headers.Get("Vary") != "" {
-			dummyCacheObj := msg.cacheObj
-			dummyCacheObj.Body = nil
-			cacheObjSer, serErr := msgpack.Marshal(dummyCacheObj)
-			if serErr != nil {
-				counters.SerErr.Add(1)
-				log.Println(serErr)
-				cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_SERERR", "", &stats)
-				continue
-			}
-			if config.Redis.MaxPipelineLen < 1 || config.Redis.SetPipelineDeadlineUS < 1 {
-				redisErr = CacheConn().Set(redisContext, GetKey(req, ""), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
-			} else {
-				redisErr = setPipe.Set(redisContext, GetKey(req, ""), string(cacheObjSer), time.Duration(maxAge)*time.Second)
-			}
-			if redisErr != nil {
-				counters.CacheErr.Add(1)
-				log.Println("Redis set error ", redisErr)
-				cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_SETERR", "", &stats)
-				continue
-			}
-		}
-
-		cacheObjSer, serErr := msgpack.Marshal(cacheObj)
+	// if we have a vary header we store a mock response just with headers so we can get the vary header on fetch
+	if cacheObj.Headers.Get("Vary") != "" {
+		dummyCacheObj := *cacheObj
+		dummyCacheObj.Body = nil
+		cacheObjSer, serErr := msgpack.Marshal(dummyCacheObj)
 		if serErr != nil {
 			counters.SerErr.Add(1)
 			log.Println(serErr)
-			cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_SERERR", "", &stats)
-			continue
+			cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_SERERR", "", stats)
+			return
 		}
-		// store response with body
 		if config.Redis.MaxPipelineLen < 1 || config.Redis.SetPipelineDeadlineUS < 1 {
-			redisErr = CacheConn().Set(redisContext, GetKey(req, cacheObj.Headers.Get("Vary")), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
+			redisErr = CacheConn().Set(redisContext, GetKey(req, ""), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
 		} else {
-			redisErr = setPipe.Set(redisContext, GetKey(req, cacheObj.Headers.Get("Vary")), string(cacheObjSer), time.Duration(maxAge)*time.Second)
+			redisErr = setPipe.Set(redisContext, GetKey(req, ""), string(cacheObjSer), time.Duration(maxAge)*time.Second)
 		}
 		if redisErr != nil {
 			counters.CacheErr.Add(1)
 			log.Println("Redis set error ", redisErr)
-			cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_SETERR", "", &stats)
-			continue
+			cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_SETERR", "", stats)
+			return
 		}
-		counters.Sets.Add(1)
-
 	}
+
+	cacheObjSer, serErr := msgpack.Marshal(cacheObj)
+	if serErr != nil {
+		counters.SerErr.Add(1)
+		log.Println(serErr)
+		cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_SERERR", "", stats)
+		return
+	}
+	// store response with body
+	if config.Redis.MaxPipelineLen < 1 || config.Redis.SetPipelineDeadlineUS < 1 {
+		redisErr = CacheConn().Set(redisContext, GetKey(req, cacheObj.Headers.Get("Vary")), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
+	} else {
+		redisErr = setPipe.Set(redisContext, GetKey(req, cacheObj.Headers.Get("Vary")), string(cacheObjSer), time.Duration(maxAge)*time.Second)
+	}
+	if redisErr != nil {
+		counters.CacheErr.Add(1)
+		log.Println("Redis set error ", redisErr)
+		cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_SETERR", "", stats)
+		return
+	}
+	counters.Sets.Add(1)
+
 }
 
-func updateTtlWorker() {
-	workerId := int64(-1)
-	for {
-		if config.Workers.PrioritiesEnabled && workerId >= 0 {
-			prioworkers.WorkEnd(workerId)
-		}
-		msg := <-updateChan
-		if config.Workers.PrioritiesEnabled {
-			workerId = prioworkers.WorkStart(updateWPrio)
-		}
-		req := &msg.req
-		respHeaders := &msg.cacheObj.Headers
-		if respHeaders.Get("Date") == "" {
-			continue
-		}
-		cacheControl := splitHeader(respHeaders, "Cache-Control", ",")
-		maxAge, err := getMaxAge(cacheControl, respHeaders, config.StandardViolations.EnableStandardViolations)
-		if err != nil {
-			continue
-		}
-		cacheKey := GetKey(req, "")
-		var redisErr error
+func updateTtlWorker(req *http.Request, respHeaders http.Header) {
+	if config.Workers.PrioritiesEnabled {
+		workerId := prioworkers.WorkStart(updateWPrio)
+		defer prioworkers.WorkEnd(workerId)
+	}
+	if respHeaders.Get("Date") == "" {
+		return
+	}
+	cacheControl := splitHeader(respHeaders, "Cache-Control", ",")
+	maxAge, err := getMaxAge(cacheControl, respHeaders, config.StandardViolations.EnableStandardViolations)
+	if err != nil {
+		return
+	}
+	cacheKey := GetKey(req, "")
+	var redisErr error
+	if config.Redis.MaxPipelineLen < 1 || config.Redis.UpdatePipelineDeadlineUS < 1 {
+		redisErr = CacheConn().Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second).Err()
+	} else {
+		redisErr = updatePipe.Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second)
+	}
+	if redisErr != nil {
+		counters.CacheErr.Add(1)
+		log.Println("Redis update error ", redisErr)
+		return
+	}
+	if respHeaders.Get("Vary") != "" {
+		cacheKey := GetKey(req, respHeaders.Get("Vary"))
 		if config.Redis.MaxPipelineLen < 1 || config.Redis.UpdatePipelineDeadlineUS < 1 {
 			redisErr = CacheConn().Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second).Err()
 		} else {
@@ -506,76 +489,67 @@ func updateTtlWorker() {
 		if redisErr != nil {
 			counters.CacheErr.Add(1)
 			log.Println("Redis update error ", redisErr)
-			continue
+			return
 		}
-		if respHeaders.Get("Vary") != "" {
-			cacheKey := GetKey(req, respHeaders.Get("Vary"))
-			if config.Redis.MaxPipelineLen < 1 || config.Redis.UpdatePipelineDeadlineUS < 1 {
-				redisErr = CacheConn().Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second).Err()
-			} else {
-				redisErr = updatePipe.Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second)
-			}
-			if redisErr != nil {
-				counters.CacheErr.Add(1)
-				log.Println("Redis update error ", redisErr)
-				continue
-			}
-		}
-		counters.Updates.Add(1)
 	}
+	counters.Updates.Add(1)
 }
 
-func revalidateWorker() {
-	workerId := int64(-1)
-	for {
-		if config.Workers.PrioritiesEnabled && workerId >= 0 {
-			prioworkers.WorkEnd(workerId)
-		}
-		msg := <-revalidateChan
-		if config.Workers.PrioritiesEnabled {
-			workerId = prioworkers.WorkStart(revalidateWPrio)
-		}
-		// if this is request is currently revalidating (by another goroutine) we skip it
-		cacheKey := GetKey(&msg.req, msg.cacheObj.Headers.Get("Vary"))
-		revalidateReqsMutex.Lock()
-		if MapHasKey(revalidateReqs, cacheKey) {
-			revalidateReqsMutex.Unlock()
-			continue
-		}
-		// add current request to currently revalidating list
-		revalidateReqs[cacheKey] = struct{}{}
-		revalidateReqsMutex.Unlock()
-		// update stats
-		counters.Revalidations.Add(1)
-		// conditional validation if possible
-		if msg.cacheObj.Headers.Get("ETag") != "" {
-			msg.req.Header.Add("If-None-Match", strings.Join(msg.cacheObj.Headers.Values("ETag"), ", "))
-		} else if msg.cacheObj.Headers.Get("Date") != "" {
-			msg.req.Header.Add("If-Modified-Since", msg.cacheObj.Headers.Get("Date"))
-		}
-		// do request
-		httpClient := &http.Client{}
-		httpClient.Timeout = 30 * time.Second
-		reqURI := msg.req.RequestURI // URI will have to be restored before caching because it's used to compute cache key
-		msg.req.RequestURI = ""      // it is required by library that RequestURI is not set
-		resp, err := httpClient.Do(&msg.req)
-		if err != nil {
-			log.Println("Error making HTTP request:", err)
-			continue
-		}
-		// process response
-		msg.req.RequestURI = reqURI // restore URI before caching because it's used to compute cache key
-		if resp.StatusCode == http.StatusNotModified {
-			updateChan <- cacheReqResp{cacheObj: cacheObjType{Headers: resp.Header.Clone()}, req: msg.req}
-		} else {
-			set(&msg.req, resp, &stopWatches{}, srcRevalidate)
-		}
-		resp.Body.Close()
-		// remove request from currently revalidating list
-		revalidateReqsMutex.Lock()
-		delete(revalidateReqs, cacheKey)
-		revalidateReqsMutex.Unlock()
+func revalidateWorker(req *http.Request, respHeaders http.Header) {
+
+	if config.Workers.PrioritiesEnabled {
+		workerId := prioworkers.WorkStart(revalidateWPrio)
+		defer prioworkers.WorkEnd(workerId)
 	}
+	// if this is request is currently revalidating (by another goroutine) we skip it
+	cacheKey := GetKey(req, respHeaders.Get("Vary"))
+	revalidateReqsMutex.Lock()
+	if MapHasKey(revalidateReqs, cacheKey) {
+		revalidateReqsMutex.Unlock()
+		return
+	}
+	// add current request to currently revalidating list
+	revalidateReqs[cacheKey] = struct{}{}
+	revalidateReqsMutex.Unlock()
+	// update stats
+	counters.Revalidations.Add(1)
+	// conditional validation if possible
+	req.Header.Del("If-None-Match")
+	req.Header.Del("If-Modified-Since")
+	if respHeaders.Get("ETag") != "" {
+		req.Header.Add("If-None-Match", strings.Join(respHeaders.Values("ETag"), ", "))
+	} else if respHeaders.Get("Date") != "" {
+		req.Header.Add("If-Modified-Since", respHeaders.Get("Date"))
+	}
+	// do request
+	if req.ContentLength == 0 {
+		req.Body.Close()
+		req.Body = nil
+	}
+	httpClient := &http.Client{}
+	httpClient.Timeout = 30 * time.Second
+	reqURI := req.RequestURI // URI will have to be restored before caching because it's used to compute cache key
+	req.RequestURI = ""      // it is required by library that RequestURI is not set
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		log.Println("Error making HTTP request:", err)
+		return
+	}
+	// process response
+	req.RequestURI = reqURI // restore URI before caching because it's used to compute cache key
+	req.Header.Del("If-None-Match")
+	req.Header.Del("If-Modified-Since")
+	if resp.StatusCode == http.StatusNotModified {
+		go updateTtlWorker(req, resp.Header)
+	} else {
+		set(req, resp, &stopWatches{}, srcRevalidate)
+	}
+	resp.Body.Close()
+	// remove request from currently revalidating list
+	revalidateReqsMutex.Lock()
+	delete(revalidateReqs, cacheKey)
+	revalidateReqsMutex.Unlock()
+
 }
 
 func sendHeaders(w http.ResponseWriter, respHeaders http.Header, req *http.Request, cacheObjInfo *cacheObjInfoType, stats *stopWatches) {
@@ -587,25 +561,13 @@ func sendHeaders(w http.ResponseWriter, respHeaders http.Header, req *http.Reque
 		cacheLog(req, cacheObjInfo.StatusCode, respHeaders, cacheObjInfo.Status, cacheObjInfo.CacheKey, stats)
 	}
 	if cacheObjInfo.IsStale { // if it's stale revalidate
-		if config.Workers.RevalidateNumWorkers > 0 {
-			revalidateChan <- cacheReqResp{
-				req: *req.Clone(redisContext),
-				cacheObj: cacheObjType{
-					Headers: respHeaders.Clone(),
-				},
-			}
-		}
+		go revalidateWorker(req.Clone(redisContext), respHeaders.Clone())
 	} else { // if not stale update ttl
-		updateChan <- cacheReqResp{
-			req: *req.Clone(redisContext),
-			cacheObj: cacheObjType{
-				Headers: respHeaders.Clone(),
-			},
-		}
+		go updateTtlWorker(req.Clone(redisContext), respHeaders.Clone())
 	}
 }
 
-func getMaxAge(cacheControl map[string]string, respHeaders *http.Header, withViolations bool) (int, error) {
+func getMaxAge(cacheControl map[string]string, respHeaders http.Header, withViolations bool) (int, error) {
 	if MapHasKey(cacheControl, "immutable") {
 		return validateMaxAge(config.Cache.MaxAge, respHeaders)
 	}
@@ -654,7 +616,7 @@ func getMaxAge(cacheControl map[string]string, respHeaders *http.Header, withVio
 	}
 }
 
-func validateMaxAge(maxAge int, respHeaders *http.Header) (int, error) {
+func validateMaxAge(maxAge int, respHeaders http.Header) (int, error) {
 	// this is needed in case we need to update ttl of a previously set cache object
 	maxAge = maxAge - getResponseAge(respHeaders)
 	// if we have a restricted mime prefix we cap maxAge accordingly
@@ -673,7 +635,7 @@ func validateMaxAge(maxAge int, respHeaders *http.Header) (int, error) {
 	return maxAge, nil
 }
 
-func getCacheControlTtl(cacheControl map[string]string, headers *http.Header) int {
+func getCacheControlTtl(cacheControl map[string]string, headers http.Header) int {
 	smaxAge, _ := MapElemToI(cacheControl, "s-maxage")
 	// if we have s-maxage and s-maxage overriding is not enabled we return it
 	if smaxAge > 0 && (!config.StandardViolations.EnableStandardViolations || !config.StandardViolations.OverrideSMaxAge) {
@@ -689,7 +651,7 @@ func getCacheControlTtl(cacheControl map[string]string, headers *http.Header) in
 	return ttl - age
 }
 
-func getExpiresTtl(headers *http.Header) int {
+func getExpiresTtl(headers http.Header) int {
 	if expires := headers.Get("Expires"); expires != "" {
 		tExpires, err := time.Parse(time.RFC1123, expires)
 		if err == nil {
@@ -699,7 +661,7 @@ func getExpiresTtl(headers *http.Header) int {
 	return 0
 }
 
-func getLastModifiedTtl(headers *http.Header) int {
+func getLastModifiedTtl(headers http.Header) int {
 	if config.Cache.AgeDivisor < 1 { // if we don't have a valid AgeDivisor we can't compute ttl based on last-modified
 		return 0
 	}
@@ -712,7 +674,7 @@ func getLastModifiedTtl(headers *http.Header) int {
 	return 0
 }
 
-func getAge(headers *http.Header) int {
+func getAge(headers http.Header) int {
 	age, ageErr := strconv.Atoi(headers.Get("Age"))
 	if ageErr == nil {
 		return age
@@ -720,7 +682,7 @@ func getAge(headers *http.Header) int {
 	return 0
 }
 
-func getResponseAge(headers *http.Header) int {
+func getResponseAge(headers http.Header) int {
 	tDate, err := time.Parse(time.RFC1123, headers.Get("Date"))
 	if err != nil {
 		return 0

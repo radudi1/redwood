@@ -66,38 +66,15 @@ func Init() {
 	// init prioworkers
 	if config.Workers.PrioritiesEnabled {
 		prioworkers.Init(&prioworkers.PrioworkersOptions{
-			MaxBlockedWorkers:        int64(config.Workers.WorkerBufferSize),
-			LowPrioSpinCnt:           int64(max(config.Workers.CacheSetNumWorkers, config.Workers.CacheUpdateNumWorkers)),
+			MaxBlockedWorkers:        int64(config.Workers.MaxBlockedWorkers),
+			LowPrioSpinCnt:           0,
 			EnforceSpinCntOnHighPrio: false,
+			SignalChanBuffSize:       config.Workers.MaxBlockedWorkers + 1,
 		})
 	}
 
-	// spin up cache set workers
-	setChan = make(chan cacheReqResp, config.Workers.WorkerBufferSize)
-	if config.Workers.CacheSetNumWorkers < 1 {
-		config.Workers.CacheSetNumWorkers = 1
-	}
-	for i := 0; i < config.Workers.CacheSetNumWorkers; i++ {
-		go setWorker()
-	}
-
-	// spin up cache update workers
-	updateChan = make(chan cacheReqResp, config.Workers.WorkerBufferSize)
-	if config.Workers.CacheUpdateNumWorkers < 1 {
-		config.Workers.CacheUpdateNumWorkers = 1
-	}
-	for i := 0; i < config.Workers.CacheUpdateNumWorkers; i++ {
-		go updateTtlWorker()
-	}
-
-	// spin up revalidate workers
-	if config.Workers.RevalidateNumWorkers > 0 {
-		revalidateChan = make(chan cacheReqResp, config.Workers.WorkerBufferSize)
-		revalidateReqs = make(map[string]struct{})
-		for i := 0; i < config.Workers.RevalidateNumWorkers; i++ {
-			go revalidateWorker()
-		}
-	}
+	// init worker assets
+	revalidateReqs = make(map[string]struct{})
 
 	// initialize other stuff
 	signalChan := make(chan os.Signal, 1)
@@ -166,9 +143,6 @@ func signalHandler(c chan os.Signal) {
 		// channel queues
 		fmt.Println("Log queue length: ", len(logChan))
 		fmt.Println("Revalidate log queue length: ", len(revalidateLogChan))
-		fmt.Println("Set queue length: ", len(setChan))
-		fmt.Println("Update queue length: ", len(updateChan))
-		fmt.Println("Revalidate queue length: ", len(revalidateChan))
 		// prioworkers state
 		fmt.Printf("%+v\n", prioworkers.GetState())
 		// pipeline stats
