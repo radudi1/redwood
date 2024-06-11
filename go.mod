@@ -15,6 +15,8 @@ require (
 	github.com/open-ch/ja3 v1.0.1
 	github.com/qri-io/starlib v0.5.0
 	github.com/redis/go-redis/v9 v9.5.1
+	github.com/redis/rueidis v1.0.38
+	github.com/redis/rueidis/rueidiscompat v1.0.38
 	github.com/remogatto/ftpget v0.0.0-20120222025949-5c3c8286a3b0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zeebo/xxh3 v1.0.2
