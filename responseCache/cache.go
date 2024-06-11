@@ -81,8 +81,6 @@ var (
 	revalidateReqs      map[string]struct{}
 	revalidateReqsMutex sync.Mutex
 
-	getPipe, setPipe, updatePipe *RedisPipeline
-
 	httpClient *http.Client
 )
 
@@ -134,11 +132,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 	// try to serve from cache
 	var cacheObjSer string
 	var redisErr error
-	if config.Redis.MaxPipelineLen < 1 || config.Redis.GetPipelineDeadlineUS < 1 {
-		cacheObjSer, redisErr = CacheConn().Get(redisContext, cacheObjInfo.CacheKey).Result()
-	} else {
-		cacheObjSer, redisErr = getPipe.Get(redisContext, cacheObjInfo.CacheKey)
-	}
+	cacheObjSer, redisErr = CacheConn().Get(redisContext, cacheObjInfo.CacheKey).Result()
 	if redisErr == redis.Nil {
 		return
 	}
@@ -152,11 +146,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 	if cacheObj.Headers.Get("Vary") != "" {
 		// we have a vary header so we fetch the real response according to vary
 		cacheObjInfo.CacheKey = GetKey(req, cacheObj.Headers.Get("Vary"))
-		if config.Redis.MaxPipelineLen < 1 || config.Redis.GetPipelineDeadlineUS < 1 {
-			cacheObjSer, redisErr = CacheConn().Get(redisContext, cacheObjInfo.CacheKey).Result()
-		} else {
-			cacheObjSer, redisErr = getPipe.Get(redisContext, cacheObjInfo.CacheKey)
-		}
+		cacheObjSer, redisErr = CacheConn().Get(redisContext, cacheObjInfo.CacheKey).Result()
 		if redisErr == redis.Nil {
 			return
 		}
@@ -172,7 +162,6 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 	respCacheControl := splitHeader(cacheObj.Headers, "Cache-Control", ",")
 	respMaxAge, maxAgeErr := getMaxAge(respCacheControl, cacheObj.Headers, false)
 	respAge := getResponseAge(cacheObj.Headers)
-	fmt.Println(req.URL, maxAgeErr, respAge, respMaxAge)
 	cacheObjInfo.IsStale = maxAgeErr != nil || respAge > respMaxAge
 	// check if cached object is stale and ServeStale is not enabled - we can then use stale-while-revalidate
 	// if ServeStale is enabled we always server stale
@@ -420,11 +409,7 @@ func setWorker(cacheObj *cacheObjType, req *http.Request, maxAge int, stats *sto
 			cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_SERERR", "", stats)
 			return
 		}
-		if config.Redis.MaxPipelineLen < 1 || config.Redis.SetPipelineDeadlineUS < 1 {
-			redisErr = CacheConn().Set(redisContext, GetKey(req, ""), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
-		} else {
-			redisErr = setPipe.Set(redisContext, GetKey(req, ""), string(cacheObjSer), time.Duration(maxAge)*time.Second)
-		}
+		redisErr = CacheConn().Set(redisContext, GetKey(req, ""), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
 		if redisErr != nil {
 			counters.CacheErr.Add(1)
 			log.Println("Redis set error ", redisErr)
@@ -441,11 +426,7 @@ func setWorker(cacheObj *cacheObjType, req *http.Request, maxAge int, stats *sto
 		return
 	}
 	// store response with body
-	if config.Redis.MaxPipelineLen < 1 || config.Redis.SetPipelineDeadlineUS < 1 {
-		redisErr = CacheConn().Set(redisContext, GetKey(req, cacheObj.Headers.Get("Vary")), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
-	} else {
-		redisErr = setPipe.Set(redisContext, GetKey(req, cacheObj.Headers.Get("Vary")), string(cacheObjSer), time.Duration(maxAge)*time.Second)
-	}
+	redisErr = CacheConn().Set(redisContext, GetKey(req, cacheObj.Headers.Get("Vary")), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
 	if redisErr != nil {
 		counters.CacheErr.Add(1)
 		log.Println("Redis set error ", redisErr)
@@ -471,11 +452,7 @@ func updateTtlWorker(req *http.Request, respHeaders http.Header) {
 	}
 	cacheKey := GetKey(req, "")
 	var redisErr error
-	if config.Redis.MaxPipelineLen < 1 || config.Redis.UpdatePipelineDeadlineUS < 1 {
-		redisErr = CacheConn().Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second).Err()
-	} else {
-		redisErr = updatePipe.Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second)
-	}
+	redisErr = CacheConn().Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second).Err()
 	if redisErr != nil {
 		counters.CacheErr.Add(1)
 		log.Println("Redis update error ", redisErr)
@@ -483,11 +460,7 @@ func updateTtlWorker(req *http.Request, respHeaders http.Header) {
 	}
 	if respHeaders.Get("Vary") != "" {
 		cacheKey := GetKey(req, respHeaders.Get("Vary"))
-		if config.Redis.MaxPipelineLen < 1 || config.Redis.UpdatePipelineDeadlineUS < 1 {
-			redisErr = CacheConn().Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second).Err()
-		} else {
-			redisErr = updatePipe.Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second)
-		}
+		redisErr = CacheConn().Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second).Err()
 		if redisErr != nil {
 			counters.CacheErr.Add(1)
 			log.Println("Redis update error ", redisErr)

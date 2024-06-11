@@ -39,25 +39,20 @@ DBNum = 0
 
 # Maximum number of parallel connections to Redis
 # New connections to redis are initiated and closed as needed up to this number
-# If set to 0 there will be no limit
-MaxNumConn = 0
+# The number should be a power of 2 - if not it will be floored to the closest power of 2
+MaxNumConn = 4
 
 # Redis can be pipelined
 # This should decrease Redis load and improve performance especially for very busy servers
 # but with the price of increased latency
-# Pipelines (and this setting) are per command type (get, set or update)
 # Greater values should increase performance and decrease Redis load but it may increase latency (from Redwood to Redis)
 # and possibly produce load spikes on Redis
 # MaxPipelineLen sets the maximum number of Redis commands that can be pipelined into a single Redis query
-# If MaxPipelineLen is 0 pipelining is disabled and single queries will be dispatched
-MaxPipelineLen = 0
-# PipelineDeadlineUS sets the maximum amount of time in microseconds until the pipeline for get requests is executed
-# If a Vary header is present 2 redis requests will be made for a single client request so this should be set to half of maximum acceptable added latency
-GetPipelineDeadlineUS = 1000
-# PipelineDeadlineUS sets the maximum amount of time in microseconds until the pipeline for set requests is executed
-SetPipelineDeadlineUS = 1000000
-# PipelineDeadlineUS sets the maximum amount of time in microseconds until the pipeline for update ttl requests is executed
-UpdatePipelineDeadlineUS = 10000000
+# The number should be a power of 2 - if not it will be floored to the closest power of 2
+MaxPipelineLen = 256
+# PipelineDeadlineUS sets the maximum amount of time in microseconds until the pipeline is waiting to receive more commands
+# Set to 0 to disable waiting - decrease latency at the cost of decreased throughput and increased Redis load
+PipelineDeadlineUS = 500
 
 
 [Log]

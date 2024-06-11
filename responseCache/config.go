@@ -12,13 +12,11 @@ const defaultConfigPath = "/etc/redwood"
 const defaultConfigFilename = "responseCache.toml"
 
 type RedisConfig struct {
-	Url                      string
-	DBNum                    int
-	MaxNumConn               int
-	MaxPipelineLen           int
-	GetPipelineDeadlineUS    int
-	SetPipelineDeadlineUS    int
-	UpdatePipelineDeadlineUS int
+	Url                string
+	DBNum              int
+	MaxNumConn         int
+	MaxPipelineLen     int
+	PipelineDeadlineUS int
 }
 
 type CacheConfig struct {
