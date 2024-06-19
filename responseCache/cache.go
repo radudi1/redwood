@@ -307,7 +307,12 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 		return
 	}
 	cacheControl := splitHeader(resp.Header, "Cache-Control", ",")
-	if resp.Header.Get("Set-Cookie") != "" && !MapHasKey(cacheControl, "public") && !MapHasKey(cacheControl, "s-maxage") {
+	// if response sets cookie it could be a response specific to a single client and there's no way to store separately from other clients
+	// but if cache-control says it's public or allows shared storage we take its' word for it
+	// also if there's no data transmited in request url or body we can assume that this request is not specific to a certain client
+	// (auth headers are already handled; cookies and x-api-key headers are already handled through cache key generation)
+	if resp.Header.Get("Set-Cookie") != "" && !MapHasKey(cacheControl, "public") && !MapHasKey(cacheControl, "s-maxage") &&
+		!(req.URL.RawQuery == "" || req.ContentLength == 0) {
 		logStatus = "UC_SETCOOKIE"
 		return
 	}
