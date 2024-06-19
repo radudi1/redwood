@@ -154,8 +154,8 @@ func signalHandler(c chan os.Signal) {
 		fmt.Printf("Updates: %d\n", counters.Updates.Load())
 		fmt.Printf("Revalidations: %d\n", counters.Revalidations.Load())
 		// error counters
-		fmt.Printf("CacheErr: %d\n", counters.CacheErr.Load())
-		fmt.Printf("SerErr: %d\n", counters.SerErr.Load())
+		fmt.Printf("CacheErr: %d\n", cacheCounters.CacheErr.Load())
+		fmt.Printf("SerErr: %d\n", cacheCounters.SerErr.Load())
 		fmt.Printf("EncodeErr: %d\n", counters.EncodeErr.Load())
 		fmt.Printf("ReadErr: %d\n", counters.ReadErr.Load())
 		fmt.Printf("WriteErr: %d\n", counters.WriteErr.Load())
