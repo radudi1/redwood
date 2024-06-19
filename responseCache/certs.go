@@ -9,7 +9,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	"github.com/redis/rueidis"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -35,7 +35,7 @@ func GetFakeCert(serverCert *x509.Certificate, privateKey crypto.PrivateKey) (fa
 	sum := md5.Sum(serverCert.Raw)
 	cacheKey := "cert:" + hex.EncodeToString(sum[:])
 	cacheObjSer, redisErr := CacheConn().Get(redisContext, cacheKey).Result()
-	if redisErr == redis.Nil {
+	if redisErr == rueidis.Nil {
 		return
 	}
 	serErr := msgpack.Unmarshal([]byte(cacheObjSer), &fakeCert.Certificate)

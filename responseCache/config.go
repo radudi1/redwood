@@ -2,6 +2,7 @@ package responseCache
 
 import (
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 
@@ -27,6 +28,7 @@ type CacheConfig struct {
 	GZIPLevel              int
 	DeflateLevel           int
 	AgeDivisor             int
+	FreshPercentRevalidate int
 	RestrictedMaxAge       int
 	RestrictedMimePrefixes []string
 	AutoAddToNoBump        bool
@@ -78,5 +80,15 @@ func loadConfig() {
 	}
 	if _, err := toml.DecodeFile(configFile, &config); err != nil {
 		log.Println("!!! Failed to decode config file ", configFile, ": ", err, " Response Cache DISABLED !!!")
+	}
+
+	// validations
+	validateConfInt(&config.Cache.FreshPercentRevalidate, 1, math.MaxInt, 100)
+
+}
+
+func validateConfInt(confSetting *int, min int, max int, defaultVal int) {
+	if *confSetting < min || *confSetting > max {
+		*confSetting = defaultVal
 	}
 }

@@ -12,14 +12,16 @@ import (
 
 	"github.com/redis/rueidis"
 	"github.com/redis/rueidis/rueidiscompat"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
-var redisConn rueidiscompat.Cmdable
+var redisConn rueidis.Client
+var redisConnCompat rueidiscompat.Cmdable
 var redisContext context.Context
 
 func RedisInit() {
 	// connect to redis
-	redisConn = cacheOpen()
+	redisConn, redisConnCompat = cacheOpen()
 	if redisConn == nil {
 		log.Panicln("!!! ERROR !!! COULD NOT CONNECT TO REDIS - responseCache IS DISABLED")
 	}
@@ -38,26 +40,56 @@ func GetKey(req *http.Request, varyHeader string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func CacheConn() rueidiscompat.Cmdable {
-	return redisConn
+func Serialize(data interface{}) (string, error) {
+	serData, serErr := msgpack.Marshal(data)
+	if serErr != nil {
+		log.Println(serErr)
+		return "", serErr
+	}
+	return string(serData), nil
 }
 
-func cacheOpen() rueidiscompat.Cmdable {
+func Unserialize(serializedData string, dstData interface{}) error {
+	serErr := msgpack.Unmarshal([]byte(serializedData), dstData)
+	if serErr != nil {
+		log.Println(serErr)
+		return serErr
+	}
+	return nil
+}
+
+func Hmget(key string, fields ...string) (map[string]string, error) {
+	redisArr, redisErr := redisConn.Do(redisContext, redisConn.B().Hmget().Key(key).Field(fields...).Build()).AsStrSlice()
+	if redisErr != nil {
+		return nil, redisErr
+	}
+	m := make(map[string]string, len(fields))
+	for i, k := range fields {
+		m[k] = redisArr[i]
+	}
+	return m, nil
+}
+
+func CacheConn() rueidiscompat.Cmdable {
+	return redisConnCompat
+}
+
+func cacheOpen() (redisConn rueidis.Client, redisConnCompat rueidiscompat.Cmdable) {
 	opts, err := rueidis.ParseURL(config.Redis.Url)
 	if err != nil {
 		log.Println("Invalid Redis URL. Caching disabled ", err)
-		return nil
+		return nil, nil
 	}
 	opts.SelectDB = config.Redis.DBNum
 	opts.PipelineMultiplex = int(math.Log2(float64(config.Redis.MaxNumConn)))
 	opts.DisableCache = true
 	opts.MaxFlushDelay = time.Duration(config.Redis.PipelineDeadlineUS) * time.Microsecond
 	opts.RingScaleEachConn = int(math.Log2(float64(config.Redis.MaxPipelineLen)))
-	conn, err := rueidis.NewClient(opts)
+	redisConn, err = rueidis.NewClient(opts)
 	if err != nil {
 		log.Println("Could not connect to Redis. Caching disabled ", err)
-		return nil
+		return nil, nil
 	}
-	compat := rueidiscompat.NewAdapter(conn)
-	return compat
+	redisConnCompat = rueidiscompat.NewAdapter(redisConn)
+	return
 }

@@ -11,16 +11,17 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/andybalholm/brotli"
 )
 
-func reEncode(dstBuf *bytes.Buffer, content *[]byte, fromEncoding string, acceptEncoding map[string]string) (resEncoding string, resErr error) {
+func reEncode(dstBuf *bytes.Buffer, content []byte, fromEncoding string, acceptEncoding map[string]string) (resEncoding string, resErr error) {
 	resEncoding = ""
-	contentReader := bytes.NewReader(*content)
+	contentReader := bytes.NewReader(content)
 	var decompressor io.Reader
 	if fromEncoding == "" {
-		decompressor = bytes.NewReader(*content)
+		decompressor = bytes.NewReader(content)
 	} else {
 		switch fromEncoding {
 		case "br":
@@ -98,6 +99,14 @@ func splitHeader(headers http.Header, headerName string, delimiter string) map[s
 	return res
 }
 
+func HeaderValToTime(headers http.Header, headerName string) (time.Time, error) {
+	headerVal := headers.Get(headerName)
+	if headerVal == "" {
+		return time.Time{}, errors.New(headerName + " header not found")
+	}
+	return time.Parse(time.RFC1123, headerVal)
+}
+
 func MapHasKey[V any](haystack map[string]V, needle string) bool {
 	_, hasKey := haystack[needle]
 	if !hasKey {
@@ -150,4 +159,8 @@ func contains(arr []int, val int) bool {
 
 func limitStr(s string, limit int) string {
 	return s[:int(math.Min(float64(len(s)), float64(limit)))]
+}
+
+func NowPlusSeconds(seconds int) time.Time {
+	return time.Now().Add(time.Duration(seconds) * time.Second)
 }

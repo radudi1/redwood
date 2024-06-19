@@ -2,6 +2,8 @@ package responseCache
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -15,11 +17,9 @@ import (
 
 	"github.com/radudi1/prioworkers"
 	"github.com/radudi1/stopwatch"
-	"github.com/redis/go-redis/v9"
-	"github.com/vmihailenco/msgpack/v5"
 )
 
-type Counters struct {
+type countersT struct {
 	Hits             atomic.Uint64
 	HitBytes         atomic.Uint64
 	Misses           atomic.Uint64
@@ -29,8 +29,6 @@ type Counters struct {
 	Sets             atomic.Uint64
 	Updates          atomic.Uint64
 	Revalidations    atomic.Uint64
-	CacheErr         atomic.Uint64
-	SerErr           atomic.Uint64
 	EncodeErr        atomic.Uint64
 	ReadErr          atomic.Uint64
 	WriteErr         atomic.Uint64
@@ -38,21 +36,6 @@ type Counters struct {
 
 type stopWatches struct {
 	getSw, setSw stopwatch.StopWatch
-}
-
-type cacheObjType struct {
-	Host       string
-	Url        string
-	StatusCode int
-	Headers    http.Header
-	Body       []byte
-}
-
-type cacheObjInfoType struct {
-	StatusCode int
-	Status     string
-	IsStale    bool
-	CacheKey   string
 }
 
 // cacheable http response codes
@@ -76,7 +59,7 @@ var uncacheableCacheControlDirectives = [...]string{
 }
 
 var (
-	counters Counters
+	counters countersT
 
 	revalidateReqs      map[string]struct{}
 	revalidateReqsMutex sync.Mutex
@@ -90,13 +73,6 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 		return false, nil
 	}
 
-	found = false
-	responseSent := false
-	cacheObjInfo := &cacheObjInfoType{
-		StatusCode: http.StatusInternalServerError,
-	}
-	var cacheObj cacheObjType
-
 	// init
 	stats = &stopWatches{}
 	stats.getSw = stopwatch.Start()
@@ -107,19 +83,6 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 		defer prioworkers.WorkEnd(workerId)
 	}
 
-	cacheObjInfo.CacheKey = GetKey(req, "")
-
-	// send headers and update stats on function return
-	defer (func() {
-		if found {
-			counters.Hits.Add(1)
-			counters.HitBytes.Add(uint64(len(cacheObj.Headers) + len(cacheObj.Body)))
-			if !responseSent {
-				sendHeaders(w, cacheObj.Headers, req, cacheObjInfo, stats)
-			}
-		}
-	})()
-
 	// we ONLY cache some requests
 	if req.Method != "GET" && req.Method != "HEAD" {
 		return
@@ -129,125 +92,152 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 		return
 	}
 
-	// try to serve from cache
-	var cacheObjSer string
-	var redisErr error
-	cacheObjSer, redisErr = CacheConn().Get(redisContext, cacheObjInfo.CacheKey).Result()
-	if redisErr == redis.Nil {
-		return
-	}
-	serErr := msgpack.Unmarshal([]byte(cacheObjSer), &cacheObj)
-	if serErr != nil {
-		counters.SerErr.Add(1)
-		log.Println(serErr)
-		return
-	}
-	// check if this is the real response or just the dummy one used for vary
-	if cacheObj.Headers.Get("Vary") != "" {
-		// we have a vary header so we fetch the real response according to vary
-		cacheObjInfo.CacheKey = GetKey(req, cacheObj.Headers.Get("Vary"))
-		cacheObjSer, redisErr = CacheConn().Get(redisContext, cacheObjInfo.CacheKey).Result()
-		if redisErr == redis.Nil {
-			return
-		}
-		serErr := msgpack.Unmarshal([]byte(cacheObjSer), &cacheObj)
-		if serErr != nil {
-			counters.SerErr.Add(1)
-			log.Println(serErr)
-			return
+	// if the client just wants validation we just check if object is present and valid
+	if reqETag := req.Header.Get("If-None-Match"); reqETag != "" {
+		cacheObj, cacheObjFound := fetchFromCache(req, []string{"statusCode", "metadata", "headers"})
+		if cacheObjFound {
+			reqETags := splitHeader(req.Header, "ETag", ",")
+			if MapHasKey(reqETags, cacheObj.headers.Get("ETag")) {
+				return sendResponse(req, cacheObj, http.StatusNotModified, w, stats)
+			}
 		}
 	}
-
-	// check if cached object is stale and decide what to do if it is
-	respCacheControl := splitHeader(cacheObj.Headers, "Cache-Control", ",")
-	respMaxAge, maxAgeErr := getMaxAge(respCacheControl, cacheObj.Headers, false)
-	respAge := getResponseAge(cacheObj.Headers)
-	cacheObjInfo.IsStale = maxAgeErr != nil || respAge > respMaxAge
-	// check if cached object is stale and ServeStale is not enabled - we can then use stale-while-revalidate
-	// if ServeStale is enabled we always server stale
-	if cacheObjInfo.IsStale && (!config.StandardViolations.EnableStandardViolations || !config.StandardViolations.ServeStale) {
-		// check if we have stale-while-revalidate and the object is fresh enough for it
-		maxStaleAge, _ := MapElemToI(cacheControl, "stale-while-revalidate")
-		if respAge > respMaxAge+maxStaleAge { // cached object is stale and we also passed stale-while-revalidate window - we can't serve
-			return
+	if req.Header.Get("If-Modified-Since") != "" {
+		cacheObj, cacheObjFound := fetchFromCache(req, []string{"statusCode", "metadata", "headers"})
+		if cacheObjFound {
+			modifiedSinceTime, err := HeaderValToTime(req.Header, "If-Modified-Since")
+			if err == nil {
+				lastModifiedTime, err := HeaderValToTime(cacheObj.headers, "Last-Modified")
+				if err == nil && (lastModifiedTime.Equal(modifiedSinceTime) || lastModifiedTime.Before(modifiedSinceTime)) {
+					return sendResponse(req, cacheObj, http.StatusNotModified, w, stats)
+				}
+			}
 		}
 	}
 
 	// if it's a HEAD request or has certain response status codes we don't send the body  - RFCs 2616 7230
 	// https://stackoverflow.com/questions/78182848/does-http-differentiate-between-an-empty-body-and-no-body
-	if req.Method == "HEAD" || int(cacheObj.StatusCode/100) == 1 || cacheObj.StatusCode == 204 || cacheObj.StatusCode == 304 {
-		found = true
-		cacheObjInfo.StatusCode = cacheObj.StatusCode
-		cacheObjInfo.Status = "HIT"
+	if req.Method == "HEAD" {
+		cacheObj, cacheObjFound := fetchFromCache(req, []string{"statusCode", "metadata", "headers"})
+		if cacheObjFound {
+			return sendResponse(req, cacheObj, cacheObj.statusCode, w, stats)
+		}
+	}
+
+	// if we get here we need to fetch full object from cache
+	cacheObj, cacheObjFound := fetchFromCache(req, nil)
+	if !cacheObjFound {
+		return false, stats
+	}
+	cacheObj.headers.Add("X-Cache", "HIT")
+	return sendResponse(req, cacheObj, cacheObj.statusCode, w, stats)
+
+}
+
+func fetchFromCache(req *http.Request, fields []string) (cacheObj *cacheObjType, foundAndValid bool) {
+	var err error
+	cacheObj, err = cacheGet(req, fields)
+	if err != nil {
+		foundAndValid = false
 		return
 	}
-	// if the client just wants validation we can already reply with valid
-	if oldETag := req.Header.Get("If-None-Match"); oldETag != "" {
-		if oldETag == cacheObj.Headers.Get("ETag") {
-			cacheObj.Headers.Add("X-Cache", "NOTMODIF")
-			found = true
-			cacheObjInfo.StatusCode = http.StatusNotModified
-			cacheObjInfo.Status = "NOTMODIF"
-			return
+	if cacheObj.IsStale() { // object is stale
+		if !config.StandardViolations.EnableStandardViolations || !config.StandardViolations.ServeStale { // serve stale is not enabled - we obey standards
+			if cacheObj.metadata.RevalidateDeadline.Before(time.Now()) { // we exceeded deadline until we could serve stale and revalidate in background according to standards
+				foundAndValid = false
+				return
+			}
+			// object is stale but it's within revalidation deadline
+			go revalidateWorker(req.Clone(context.Background()), cacheObj.headers.Clone())
+		} else { // serve stale is enabled - we serve and revalidate
+			go revalidateWorker(req.Clone(context.Background()), cacheObj.headers.Clone())
 		}
-	} else if req.Header.Get("If-Modified-Since") != "" {
-		cacheObj.Headers.Add("X-Cache", "NOTMODIF")
-		found = true
-		cacheObjInfo.StatusCode = http.StatusNotModified
-		cacheObjInfo.Status = "NOTMODIF"
-		return
+	}
+	// if we get here we can serve the object and we also update ttl
+	foundAndValid = true
+	go updateTtlWorker(cacheObj.metadata, *req.Clone(context.Background()), cacheObj.headers)
+	return
+}
+
+func sendResponse(req *http.Request, cacheObj *cacheObjType, toClientStatusCode int, w http.ResponseWriter, stats *stopWatches) (ok bool, s *stopWatches) {
+
+	// update stats
+	counters.Hits.Add(1)
+	counters.HitBytes.Add(uint64(len(cacheObj.headers) + len(cacheObj.body)))
+
+	// set log status (will be modified if necessary)
+	logStatus := "HIT"
+
+	// log on exit
+	defer func() {
+		cacheLog(req, cacheObj.statusCode, cacheObj.headers, logStatus, cacheObj.cacheKey, stats)
+	}()
+
+	// if not modified there's nothing there to send except status code
+	if toClientStatusCode == http.StatusNotModified {
+		logStatus = "NOTMODIF"
+		w.WriteHeader(toClientStatusCode)
+		return true, stats
+	}
+
+	// copy response headers
+	for headerName, valSlice := range cacheObj.headers {
+		for _, headerValue := range valSlice {
+			w.Header().Add(headerName, headerValue)
+		}
+	}
+
+	// if it's a HEAD request or has certain response status codes we don't send the body  - RFCs 2616 7230
+	// https://stackoverflow.com/questions/78182848/does-http-differentiate-between-an-empty-body-and-no-body
+	if req.Method == "HEAD" || int(toClientStatusCode/100) == 1 || toClientStatusCode == 204 || toClientStatusCode == 304 {
+		// send headers
+		w.WriteHeader(toClientStatusCode)
+		return true, stats
 	}
 
 	// check if body needs reencoding (compression algo not supported by client)
-	respEncoding := cacheObj.Headers.Get("Content-Encoding")
+	respEncoding := cacheObj.headers.Get("Content-Encoding")
 	if respEncoding != "" {
 		acceptEncoding := splitHeader(req.Header, "Accept-Encoding", ",")
 		if !MapHasKey(acceptEncoding, respEncoding) {
 			var encodedBuf bytes.Buffer
-			encoding, reEncodeErr := reEncode(&encodedBuf, &cacheObj.Body, respEncoding, acceptEncoding)
+			encoding, reEncodeErr := reEncode(&encodedBuf, []byte(cacheObj.body), respEncoding, acceptEncoding)
 			if reEncodeErr != nil {
 				counters.EncodeErr.Add(1)
 				log.Println("Could not reeencode cached response: ", reEncodeErr)
-				return
+				return false, stats
 			}
-			cacheObj.Body = encodedBuf.Bytes()
+			cacheObj.body = encodedBuf.String()
 			if encoding == "" {
-				cacheObj.Headers.Del("Content-Encoding")
+				cacheObj.headers.Del("Content-Encoding")
 			} else {
-				cacheObj.Headers.Set("Content-Encoding", encoding)
+				cacheObj.headers.Set("Content-Encoding", encoding)
 			}
-			cacheObj.Headers.Set("Content-Length", fmt.Sprint(len(cacheObj.Body)))
+			cacheObj.headers.Set("Content-Length", fmt.Sprint(len(cacheObj.body)))
 		}
 	}
 
-	// send response headers
-	found = true
-	responseSent = true
-	cacheObjInfo.StatusCode = cacheObj.StatusCode
-	cacheObjInfo.Status = "HIT"
-	cacheObj.Headers.Add("X-Cache", "HIT")
-	sendHeaders(w, cacheObj.Headers, req, cacheObjInfo, stats)
+	// send headers
+	w.WriteHeader(toClientStatusCode)
+
 	// send response body
-	n, writeErr := w.Write(cacheObj.Body)
+	n, writeErr := w.Write([]byte(cacheObj.body))
 	if writeErr != nil {
 		counters.WriteErr.Add(1)
 		log.Println(writeErr)
-		return
+		return true, stats
 	}
-	if n != len(cacheObj.Body) {
+	if n != len(cacheObj.body) {
 		counters.WriteErr.Add(1)
-		log.Println("Written ", n, " bytes to client instead of ", len(cacheObj.Body), "!!!")
+		log.Println("Written ", n, " bytes to client instead of ", len(cacheObj.body), "!!!")
 	}
-	return
+
+	return true, stats
 }
 
 func Set(req *http.Request, resp *http.Response, stats *stopWatches) {
 	if !config.Cache.Enabled {
 		return
-	}
-	if config.Workers.PrioritiesEnabled {
-		workerId := prioworkers.WorkStart(mainPrio)
-		defer prioworkers.WorkEnd(workerId)
 	}
 	set(req, resp, stats, srcClient)
 }
@@ -271,13 +261,17 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 	stats.setSw = stopwatch.Start()
 	defer stats.setSw.Stop()
 
-	var cacheObj *cacheObjType
+	var body []byte
+	var err error
+
+	// create metadata
+	metadata := metadata{}
 
 	// update counters when function returns
 	defer (func() {
 		if logStatus == "MISS" {
 			counters.Misses.Add(1)
-			counters.MissBytes.Add(uint64(len(cacheObj.Body)))
+			counters.MissBytes.Add(uint64(len(body)))
 		} else {
 			counters.Uncacheable.Add(1)
 			if resp.ContentLength > 0 {
@@ -338,9 +332,11 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 		return
 	}
 
-	// Compute cache TTL from response
-	maxAge, err := getMaxAge(cacheControl, resp.Header, config.StandardViolations.EnableStandardViolations)
-	if err != nil {
+	// set updated time
+	metadata.Updated = time.Now()
+
+	// set other metadata times
+	if metadata.setTimes(resp.Header) != nil {
 		logStatus = "UC_STALE"
 		return
 	}
@@ -350,7 +346,7 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 		R: resp.Body,
 		N: int64(sizeLimit),
 	}
-	body, err := io.ReadAll(lr)
+	body, err = io.ReadAll(lr)
 	// Servers that use broken chunked Transfer-Encoding can give us unexpected EOFs,
 	// even if we got all the content.
 	if err == io.ErrUnexpectedEOF && resp.ContentLength == -1 {
@@ -374,99 +370,35 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 		return
 	}
 
-	// try to cache
-	cacheObj = &cacheObjType{
-		Host:       req.Host,
-		Url:        req.RequestURI,
-		StatusCode: resp.StatusCode,
-		Headers:    resp.Header.Clone(),
-		Body:       body,
-	}
-
-	go setWorker(cacheObj, req, maxAge, stats)
+	// send to cache
+	metadata.Vary = varyHeadersAsStr(resp.Header)
+	go setWorker(resp.StatusCode, metadata, req.Clone(context.Background()), resp.Header.Clone(), string(body))
 
 	logStatus = "MISS"
 
 }
 
-func setWorker(cacheObj *cacheObjType, req *http.Request, maxAge int, stats *stopWatches) {
-
+func setWorker(statusCode int, metadata metadata, req *http.Request, respHeaders http.Header, body string) {
 	if config.Workers.PrioritiesEnabled {
-		workerId := prioworkers.WorkStart(setWPrio)
+		workerId := prioworkers.WorkStart(mainPrio)
 		defer prioworkers.WorkEnd(workerId)
 	}
-
-	var redisErr error
-
-	// if we have a vary header we store a mock response just with headers so we can get the vary header on fetch
-	if cacheObj.Headers.Get("Vary") != "" {
-		dummyCacheObj := *cacheObj
-		dummyCacheObj.Body = nil
-		cacheObjSer, serErr := msgpack.Marshal(dummyCacheObj)
-		if serErr != nil {
-			counters.SerErr.Add(1)
-			log.Println(serErr)
-			cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_SERERR", "", stats)
-			return
-		}
-		redisErr = CacheConn().Set(redisContext, GetKey(req, ""), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
-		if redisErr != nil {
-			counters.CacheErr.Add(1)
-			log.Println("Redis set error ", redisErr)
-			cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_SETERR", "", stats)
-			return
-		}
-	}
-
-	cacheObjSer, serErr := msgpack.Marshal(cacheObj)
-	if serErr != nil {
-		counters.SerErr.Add(1)
-		log.Println(serErr)
-		cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_SERERR", "", stats)
-		return
-	}
-	// store response with body
-	redisErr = CacheConn().Set(redisContext, GetKey(req, cacheObj.Headers.Get("Vary")), string(cacheObjSer), time.Duration(maxAge)*time.Second).Err()
-	if redisErr != nil {
-		counters.CacheErr.Add(1)
-		log.Println("Redis set error ", redisErr)
-		cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, "UC_SETERR", "", stats)
-		return
+	if err := cacheSet(statusCode, metadata, req, respHeaders, body); err != nil {
+		log.Println("Error setting cache object for ", req.RequestURI)
 	}
 	counters.Sets.Add(1)
-
 }
 
-func updateTtlWorker(req *http.Request, respHeaders http.Header) {
+func updateTtlWorker(cachedMetadata metadata, req http.Request, respHeaders http.Header) {
 	if config.Workers.PrioritiesEnabled {
 		workerId := prioworkers.WorkStart(updateWPrio)
 		defer prioworkers.WorkEnd(workerId)
 	}
-	if respHeaders.Get("Date") == "" {
-		return
-	}
-	cacheControl := splitHeader(respHeaders, "Cache-Control", ",")
-	maxAge, err := getMaxAge(cacheControl, respHeaders, config.StandardViolations.EnableStandardViolations)
-	if err != nil {
-		return
-	}
-	cacheKey := GetKey(req, "")
-	var redisErr error
-	redisErr = CacheConn().Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second).Err()
-	if redisErr != nil {
-		counters.CacheErr.Add(1)
-		log.Println("Redis update error ", redisErr)
-		return
-	}
-	if respHeaders.Get("Vary") != "" {
-		cacheKey := GetKey(req, respHeaders.Get("Vary"))
-		redisErr = CacheConn().Expire(redisContext, cacheKey, time.Duration(maxAge)*time.Second).Err()
-		if redisErr != nil {
-			counters.CacheErr.Add(1)
-			log.Println("Redis update error ", redisErr)
-			return
-		}
-	}
+
+	cachedMetadata.setTimes(respHeaders)
+
+	cacheUpdate(&req, cachedMetadata)
+
 	counters.Updates.Add(1)
 }
 
@@ -513,7 +445,11 @@ func revalidateWorker(req *http.Request, respHeaders http.Header) {
 	req.Header.Del("If-None-Match")
 	req.Header.Del("If-Modified-Since")
 	if resp.StatusCode == http.StatusNotModified {
-		go updateTtlWorker(req, resp.Header)
+		metadata := metadata{
+			Updated: time.Now(),
+			Vary:    varyHeadersAsStr(resp.Header),
+		}
+		go updateTtlWorker(metadata, *req.Clone(context.Background()), resp.Header)
 	} else {
 		set(req, resp, &stopWatches{}, srcRevalidate)
 	}
@@ -525,73 +461,98 @@ func revalidateWorker(req *http.Request, respHeaders http.Header) {
 
 }
 
-func sendHeaders(w http.ResponseWriter, respHeaders http.Header, req *http.Request, cacheObjInfo *cacheObjInfoType, stats *stopWatches) {
-	for k, v := range respHeaders {
-		w.Header().Set(k, strings.Join(v, " "))
+func (metadata *metadata) setTimes(respHeaders http.Header) error {
+	cacheControl := splitHeader(respHeaders, "cache-control", ",")
+
+	// set stale time
+	// object becomes stale when headers tell us (according to standards)
+	maxAge, err := getMaxAge(cacheControl, respHeaders, false)
+	if err != nil || maxAge <= 0 {
+		return errors.New("cannot compute stale time")
 	}
-	w.WriteHeader(cacheObjInfo.StatusCode)
-	if req != nil {
-		cacheLog(req, cacheObjInfo.StatusCode, respHeaders, cacheObjInfo.Status, cacheObjInfo.CacheKey, stats)
+	metadata.Stale = NowPlusSeconds(maxAge)
+
+	// set expire time
+	// object can expire at stale time if we follow standards or at a later time if standard violations are enabled
+	maxAge, err = getMaxAge(cacheControl, respHeaders, config.StandardViolations.EnableStandardViolations)
+	if err != nil || maxAge <= 0 {
+		return errors.New("cannot compute expire time")
 	}
-	if cacheObjInfo.IsStale { // if it's stale revalidate
-		go revalidateWorker(req.Clone(redisContext), respHeaders.Clone())
-	} else { // if not stale update ttl
-		go updateTtlWorker(req.Clone(redisContext), respHeaders.Clone())
+	metadata.Expires = NowPlusSeconds(maxAge)
+
+	// set revalidate deadline to be FreshPercentRevalidate percent of freshness time
+	// if we have "stale-while-revalidate" it will be used only if it's sooner
+	freshDuration := metadata.Stale.Sub(metadata.Updated)
+	revalidateAfterSeconds := freshDuration.Seconds() * (float64(config.Cache.FreshPercentRevalidate) / 100)
+	metadata.RevalidateDeadline = NowPlusSeconds(int(revalidateAfterSeconds))
+	if MapHasKey(cacheControl, "stale-while-revalidate") {
+		revalidateWindow, ok := MapElemToI(cacheControl, "stale-while-revalidate")
+		if ok {
+			revalidateTime := metadata.Stale.Add(time.Duration(revalidateWindow) * time.Second)
+			if revalidateTime.Before(metadata.RevalidateDeadline) {
+				metadata.RevalidateDeadline = revalidateTime
+			}
+		}
 	}
+
+	return nil
 }
 
 func getMaxAge(cacheControl map[string]string, respHeaders http.Header, withViolations bool) (int, error) {
 	if MapHasKey(cacheControl, "immutable") {
-		return validateMaxAge(config.Cache.MaxAge, respHeaders)
+		return validateMaxAge(config.Cache.MaxAge, respHeaders, withViolations)
 	}
 	// if standard violation is enabled use this algorithm
 	if withViolations {
-		maxAge := getCacheControlTtl(cacheControl, respHeaders)
+		maxAge := getCacheControlTtl(cacheControl, respHeaders, withViolations)
 		// if OverrideCacheControl is enabled we use this algo
 		if config.StandardViolations.OverrideCacheControl {
 			maxAge = max(maxAge, min(getLastModifiedTtl(respHeaders), config.StandardViolations.OverrideCacheControlMaxAge))
 			if maxAge > 0 {
-				return validateMaxAge(maxAge, respHeaders)
+				return validateMaxAge(maxAge, respHeaders, withViolations)
 			}
 			// no cache-control and no last-modified
 			if age := getAge(respHeaders); age > 0 { // if age header is present we compute ttl based on that
-				return validateMaxAge(age/config.Cache.AgeDivisor, respHeaders)
+				return validateMaxAge(age/config.Cache.AgeDivisor, respHeaders, withViolations)
 			}
 			// we resort to expire unless it is overriden
 			if !config.StandardViolations.OverrideExpire {
 				if maxAge = getExpiresTtl(respHeaders); maxAge > 0 {
-					return validateMaxAge(maxAge, respHeaders)
+					return validateMaxAge(maxAge, respHeaders, withViolations)
 				}
 			}
 			// there are no headers present that we can't compute ttl on so we return the minimum default
-			return validateMaxAge(config.StandardViolations.DefaultAge, respHeaders)
+			return validateMaxAge(config.StandardViolations.DefaultAge, respHeaders, withViolations)
 		}
 		// if OverrideCacheControl is disabled we use this algo
 		if maxAge > 0 {
-			return validateMaxAge(maxAge, respHeaders)
+			return validateMaxAge(maxAge, respHeaders, withViolations)
 		}
 		if !config.StandardViolations.OverrideExpire {
 			if maxAge = getExpiresTtl(respHeaders); maxAge > 0 {
-				return validateMaxAge(maxAge, respHeaders)
+				return validateMaxAge(maxAge, respHeaders, withViolations)
 			}
 		}
-		return validateMaxAge(getLastModifiedTtl(respHeaders), respHeaders)
+		return validateMaxAge(getLastModifiedTtl(respHeaders), respHeaders, withViolations)
 	} else { // standard violations are not enabled
 		// return from cache-control if possible
-		if maxAge := getCacheControlTtl(cacheControl, respHeaders); maxAge > 0 {
-			return validateMaxAge(maxAge, respHeaders)
+		if maxAge := getCacheControlTtl(cacheControl, respHeaders, withViolations); maxAge > 0 {
+			return validateMaxAge(maxAge, respHeaders, withViolations)
 		}
 		if maxAge := getExpiresTtl(respHeaders); maxAge > 0 {
-			return validateMaxAge(maxAge, respHeaders)
+			return validateMaxAge(maxAge, respHeaders, withViolations)
 		}
 		// otherwise return from last-modified
-		return validateMaxAge(getLastModifiedTtl(respHeaders), respHeaders)
+		return validateMaxAge(getLastModifiedTtl(respHeaders), respHeaders, withViolations)
 	}
 }
 
-func validateMaxAge(maxAge int, respHeaders http.Header) (int, error) {
-	// this is needed in case we need to update ttl of a previously set cache object
-	maxAge = maxAge - getResponseAge(respHeaders)
+func validateMaxAge(maxAge int, respHeaders http.Header, withViolations bool) (int, error) {
+	// if violations are enabled we already apply different heuristics to determine ttl - therefore we ignore age here
+	// otherwise age must be substracted
+	if !withViolations {
+		maxAge = maxAge - getAge(respHeaders)
+	}
 	// if we have a restricted mime prefix we cap maxAge accordingly
 	for _, v := range config.Cache.RestrictedMimePrefixes {
 		if strings.HasPrefix(respHeaders.Get("Content-Type"), v) {
@@ -608,27 +569,26 @@ func validateMaxAge(maxAge int, respHeaders http.Header) (int, error) {
 	return maxAge, nil
 }
 
-func getCacheControlTtl(cacheControl map[string]string, headers http.Header) int {
+func getCacheControlTtl(cacheControl map[string]string, headers http.Header, withViolations bool) int {
 	smaxAge, _ := MapElemToI(cacheControl, "s-maxage")
 	// if we have s-maxage and s-maxage overriding is not enabled we return it
-	if smaxAge > 0 && (!config.StandardViolations.EnableStandardViolations || !config.StandardViolations.OverrideSMaxAge) {
-		return smaxAge - getAge(headers)
+	if smaxAge > 0 && (!withViolations || !config.StandardViolations.OverrideSMaxAge) {
+		return smaxAge
 	}
 	// s-maxage is not present or it's overriden so we fetch maxage and return maximum of the 2 values minus age
 	maxAge, _ := MapElemToI(cacheControl, "max-age")
 	ttl := max(maxAge, smaxAge)
-	age := getAge(headers)
-	if config.StandardViolations.EnableStandardViolations && ttl-age < 0 { // this is NOT according to standard !!! but some servers send responses which are extensively stale - if response is good for them it should be good for us
+	if config.StandardViolations.EnableStandardViolations && ttl < 0 { // this is NOT according to standard !!! but some servers send responses which are extensively stale - if response is good for them it should be good for us
 		return ttl
 	}
-	return ttl - age
+	return ttl
 }
 
 func getExpiresTtl(headers http.Header) int {
 	if expires := headers.Get("Expires"); expires != "" {
 		tExpires, err := time.Parse(time.RFC1123, expires)
 		if err == nil {
-			return int(tExpires.Sub(time.Now()).Seconds())
+			return int(time.Until(tExpires).Seconds())
 		}
 	}
 	return 0
@@ -638,27 +598,21 @@ func getLastModifiedTtl(headers http.Header) int {
 	if config.Cache.AgeDivisor < 1 { // if we don't have a valid AgeDivisor we can't compute ttl based on last-modified
 		return 0
 	}
-	if lastModified := headers.Get("Last-Modified"); lastModified != "" {
-		tLastModified, err := time.Parse(time.RFC1123, lastModified)
-		if err == nil {
-			return int(float64(time.Since(tLastModified).Seconds()) / float64(config.Cache.AgeDivisor))
-		}
+	lastModifiedTime, err := HeaderValToTime(headers, "Last-Modified")
+	if err != nil {
+		return 0
 	}
-	return 0
+	return int(float64(time.Since(lastModifiedTime).Seconds()) / float64(config.Cache.AgeDivisor))
 }
 
 func getAge(headers http.Header) int {
+	tDate, err := time.Parse(time.RFC1123, headers.Get("Date"))
+	if err == nil {
+		return int(time.Since(tDate).Seconds())
+	}
 	age, ageErr := strconv.Atoi(headers.Get("Age"))
 	if ageErr == nil {
 		return age
 	}
 	return 0
-}
-
-func getResponseAge(headers http.Header) int {
-	tDate, err := time.Parse(time.RFC1123, headers.Get("Date"))
-	if err != nil {
-		return 0
-	}
-	return int(time.Since(tDate).Seconds())
 }
