@@ -248,11 +248,11 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 	switch reqSrc {
 	case srcClient:
 		defer func() {
-			cacheLog(req, resp.StatusCode, resp.Header, logStatus, GetKey(req, resp.Header.Get("Vary")), stats)
+			cacheLog(req, resp.StatusCode, resp.Header, logStatus, cacheGetKey(req, resp.Header.Get("Vary")), stats)
 		}()
 	case srcRevalidate:
 		defer func() {
-			revalidateLog(req, resp.StatusCode, resp.Header, logStatus, GetKey(req, resp.Header.Get("Vary")), stats)
+			revalidateLog(req, resp.StatusCode, resp.Header, logStatus, cacheGetKey(req, resp.Header.Get("Vary")), stats)
 		}()
 	default:
 		panic("Invalid request source received for responsecache set")
@@ -414,7 +414,7 @@ func revalidateWorker(req *http.Request, respHeaders http.Header) {
 		defer prioworkers.WorkEnd(workerId)
 	}
 	// if this is request is currently revalidating (by another goroutine) we skip it
-	cacheKey := GetKey(req, respHeaders.Get("Vary"))
+	cacheKey := cacheGetKey(req, respHeaders.Get("Vary"))
 	revalidateReqsMutex.Lock()
 	if MapHasKey(revalidateReqs, cacheKey) {
 		revalidateReqsMutex.Unlock()

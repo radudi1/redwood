@@ -40,11 +40,22 @@ type cacheCountersT struct {
 
 var cacheCounters cacheCountersT
 
+func cacheGetKey(req *http.Request, varyHeader string) string {
+	keyStr := req.Host + " " + req.RequestURI + strings.Join(req.Header.Values("Cookie"), "") + strings.Join(req.Header.Values("X-API-Key"), "")
+	if varyHeader != "" {
+		varyArr := strings.Split(varyHeader, ",")
+		for _, v := range varyArr {
+			keyStr += " " + req.Header.Get(v)
+		}
+	}
+	return HashKey(keyStr)
+}
+
 func cacheGet(req *http.Request, fields []string) (cacheObj *cacheObjType, err error) {
 
 	// init
 	cacheObj = &cacheObjType{
-		metadataCacheKey: GetKey(req, ""),
+		metadataCacheKey: cacheGetKey(req, ""),
 	}
 	if len(fields) == 0 {
 		fields = []string{"statusCode", "metadata", "headers", "body"}
@@ -72,7 +83,7 @@ func cacheGet(req *http.Request, fields []string) (cacheObj *cacheObjType, err e
 
 	// if there's a vary header then fetch the real response
 	if cacheObj.metadata.Vary != "" {
-		cacheObj.cacheKey = GetKey(req, varyVals(cacheObj.metadata.Vary, req.Header))
+		cacheObj.cacheKey = cacheGetKey(req, varyVals(cacheObj.metadata.Vary, req.Header))
 		serFields, redisErr = Hmget(cacheObj.cacheKey, fields...)
 		if redisErr != nil {
 			if redisErr != rueidis.Nil {
@@ -125,7 +136,7 @@ func cacheSet(statusCode int, metadata metadata, req *http.Request, respHeaders 
 	// if we have Vary then we store metadata-only
 	// we assume that requests that vary have the same caching directives for all variations
 	if metadata.Vary != "" {
-		cacheKey := GetKey(req, "")
+		cacheKey := cacheGetKey(req, "")
 		redisErr := redisConn.Do(
 			redisContext,
 			redisConn.B().Hset().
@@ -144,7 +155,7 @@ func cacheSet(statusCode int, metadata metadata, req *http.Request, respHeaders 
 		}
 	}
 	// set the real response with headers and body included
-	cacheKey := GetKey(req, varyVals(metadata.Vary, req.Header))
+	cacheKey := cacheGetKey(req, varyVals(metadata.Vary, req.Header))
 	redisErr := redisConn.Do(
 		redisContext,
 		redisConn.B().Hset().
@@ -174,7 +185,7 @@ func cacheUpdate(req *http.Request, metadata metadata) error {
 		return serErr
 	}
 	// update metadata for the main cache entry (the one without vary)
-	cacheKey := GetKey(req, "")
+	cacheKey := cacheGetKey(req, "")
 	redisErr := redisConn.Do(
 		redisContext,
 		redisConn.B().Hset().
@@ -193,7 +204,7 @@ func cacheUpdate(req *http.Request, metadata metadata) error {
 	}
 	// if vary headers are present update metadata for the actual cache object
 	if metadata.Vary != "" {
-		cacheKey = GetKey(req, varyVals(metadata.Vary, req.Header))
+		cacheKey = cacheGetKey(req, varyVals(metadata.Vary, req.Header))
 		redisErr = redisConn.Do(
 			redisContext,
 			redisConn.B().Hset().
