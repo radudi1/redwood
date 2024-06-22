@@ -2,10 +2,8 @@ package responseCache
 
 import (
 	"crypto"
-	"crypto/md5"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/hex"
 	"log"
 	"time"
 
@@ -13,12 +11,15 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
+func GetCertKey(cert *x509.Certificate) string {
+	return "cert:" + HashKey(string(cert.Raw))
+}
+
 func IsCertValid(cert *x509.Certificate) bool {
 	if !config.Cache.Enabled { // respCache is actually disabled
 		return false
 	}
-	sum := md5.Sum(cert.Raw)
-	found, err := CacheConn().Exists(redisContext, "cert:"+hex.EncodeToString(sum[:])).Result()
+	found, err := CacheConn().Exists(redisContext, GetCertKey(cert)).Result()
 	if err != nil {
 		log.Println(err)
 		return false
@@ -32,9 +33,7 @@ func GetFakeCert(serverCert *x509.Certificate, privateKey crypto.PrivateKey) (fa
 	}
 	fakeCert = tls.Certificate{}
 	found = false
-	sum := md5.Sum(serverCert.Raw)
-	cacheKey := "cert:" + hex.EncodeToString(sum[:])
-	cacheObjSer, redisErr := CacheConn().Get(redisContext, cacheKey).Result()
+	cacheObjSer, redisErr := CacheConn().Get(redisContext, GetCertKey(serverCert)).Result()
 	if redisErr == rueidis.Nil {
 		return
 	}
@@ -52,7 +51,6 @@ func SetCertAsValid(serverCert *x509.Certificate, fakeCert *tls.Certificate) {
 	if !config.Cache.Enabled { // respCache is actually disabled
 		return
 	}
-	sum := md5.Sum(serverCert.Raw)
 	fakeCertSer, serErr := msgpack.Marshal(fakeCert.Certificate)
 	if serErr != nil {
 		log.Println(serErr)
@@ -65,7 +63,7 @@ func SetCertAsValid(serverCert *x509.Certificate, fakeCert *tls.Certificate) {
 	if ttl.Seconds() > float64(config.Cache.MaxAge) {
 		ttl = time.Duration(config.Cache.MaxAge) * time.Second
 	}
-	redisErr := CacheConn().Set(redisContext, "cert:"+hex.EncodeToString(sum[:]), fakeCertSer, ttl).Err()
+	redisErr := CacheConn().Set(redisContext, GetCertKey(serverCert), fakeCertSer, ttl).Err()
 	if redisErr != nil {
 		log.Println(redisErr)
 	}

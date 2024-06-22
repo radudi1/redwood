@@ -4,9 +4,7 @@ import (
 	"context"
 	"log"
 	"math"
-	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/redis/rueidis"
@@ -28,16 +26,17 @@ func RedisInit() {
 	redisContext = context.Background()
 }
 
-func GetKey(req *http.Request, varyHeader string) string {
-	keyStr := req.Host + " " + req.RequestURI + strings.Join(req.Header.Values("Cookie"), "") + strings.Join(req.Header.Values("X-API-Key"), "")
-	if varyHeader != "" {
-		varyArr := strings.Split(varyHeader, ",")
-		for _, v := range varyArr {
-			keyStr += " " + req.Header.Get(v)
-		}
+func HashKey(key string) string {
+	sum := xxh3.HashString128(key)
+	hiStr := strconv.FormatUint(sum.Hi, 16)
+	loStr := strconv.FormatUint(sum.Lo, 16)
+	for i := 0; len(hiStr) < 16; i++ {
+		hiStr = "0" + hiStr
 	}
-	sum := xxh3.HashString(keyStr)
-	return strconv.FormatUint(sum, 16)
+	for i := 0; len(loStr) < 16; i++ {
+		loStr = "0" + loStr
+	}
+	return hiStr + loStr
 }
 
 func Serialize(data interface{}) (string, error) {
