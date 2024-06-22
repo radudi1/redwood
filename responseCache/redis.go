@@ -2,17 +2,17 @@ package responseCache
 
 import (
 	"context"
-	"crypto/md5"
-	"encoding/hex"
 	"log"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/redis/rueidis"
 	"github.com/redis/rueidis/rueidiscompat"
 	"github.com/vmihailenco/msgpack/v5"
+	"github.com/zeebo/xxh3"
 )
 
 var redisConn rueidis.Client
@@ -36,8 +36,8 @@ func GetKey(req *http.Request, varyHeader string) string {
 			keyStr += " " + req.Header.Get(v)
 		}
 	}
-	sum := md5.Sum([]byte(keyStr))
-	return hex.EncodeToString(sum[:])
+	sum := xxh3.HashString(keyStr)
+	return strconv.FormatUint(sum, 16)
 }
 
 func Serialize(data interface{}) (string, error) {
