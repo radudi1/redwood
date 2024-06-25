@@ -27,6 +27,10 @@ func NewCache(storage *storage.Storage) *Cache {
 	return cache
 }
 
+func (cache *Cache) GetStorage() *storage.Storage {
+	return cache.storage
+}
+
 func (cache *Cache) Get(req *http.Request, fields ...string) (cacheObj *CacheObject, err error) {
 
 	// init

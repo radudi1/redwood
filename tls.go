@@ -644,9 +644,9 @@ func (s *singleListener) Addr() net.Addr {
 // self-signed.
 func imitateCertificate(serverCert *x509.Certificate, selfSigned bool, sni string) (cert tls.Certificate, err error) {
 	conf := getConfig()
-	fakeCert, found := responseCache.GetFakeCert(serverCert, conf.TLSCert.PrivateKey)
-	if found {
-		return fakeCert, nil
+	fakeCert := responseCache.GetFakeCert(serverCert, conf.TLSCert.PrivateKey)
+	if fakeCert != nil {
+		return *fakeCert, nil
 	}
 	// Use a hash of the real certificate (plus some other things) as the serial number.
 	h := md5.New()

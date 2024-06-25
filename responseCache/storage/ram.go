@@ -62,6 +62,10 @@ func (ram *RamStorage) Update(key string, storageObj *StorageObject) error {
 	return nil
 }
 
+func (ram *RamStorage) Has(key string) bool {
+	return ram.cache.Contains(key)
+}
+
 func (ram *RamStorage) GCWorker() {
 	for _, key := range ram.cache.Keys() {
 		obj, ok := ram.cache.Peek(key)

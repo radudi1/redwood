@@ -72,6 +72,17 @@ func (storage *Storage) Update(key string, storageObj *StorageObject) error {
 	return err
 }
 
+func (storage *Storage) Has(key string) bool {
+	//ram
+	if storage.ram != nil {
+		if storage.ram.Has(key) {
+			return true
+		}
+	}
+	//redis
+	return storage.redis.Has(key)
+}
+
 func (storage *Storage) GetRedisConn() rueidis.Client {
 	return storage.redis.wrapper.GetConn()
 }
