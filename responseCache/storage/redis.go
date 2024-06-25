@@ -84,9 +84,10 @@ func (redis *RedisStorage) Set(key string, storageObj *StorageObject) error {
 			return serErr
 		}
 		query = query.FieldValue("statusCode", strconv.Itoa(storageObj.StatusCode)).FieldValue("headers", headersSer)
-		if len(storageObj.Body) > 0 {
-			query = query.FieldValue("body", storageObj.Body)
-		}
+	}
+
+	if len(storageObj.Body) > 0 {
+		query = query.FieldValue("body", storageObj.Body)
 	}
 
 	redisErr := redis.wrapper.GetConn().Do(redis.wrapper.Context, query.Build()).Error()
@@ -125,6 +126,20 @@ func (redis *RedisStorage) Update(key string, storageObj *StorageObject) error {
 		return redisErr
 	}
 	return nil
+}
+
+func (redis *RedisStorage) Has(key string) bool {
+	exists, redisErr := redis.wrapper.GetConn().Do(
+		redis.wrapper.Context,
+		redis.wrapper.GetConn().B().Exists().
+			Key(key).
+			Build()).
+		AsBool()
+	if redisErr != nil {
+		redis.counters.cacheErr.Add(1)
+		return false
+	}
+	return exists
 }
 
 // Sets redis ttl for key according to metadata
