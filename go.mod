@@ -10,6 +10,7 @@ require (
 	github.com/dop251/goja v0.0.0-20240220182346-e401ed450204
 	github.com/dop251/goja_nodejs v0.0.0-20240418154818-2aae10d4cbcf
 	github.com/golang/gddo v0.0.0-20210115222349-20d68f94ee1f
+	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/klauspost/compress v1.17.8
 	github.com/miekg/dns v1.1.59
 	github.com/open-ch/ja3 v1.0.1

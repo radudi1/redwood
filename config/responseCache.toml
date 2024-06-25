@@ -63,6 +63,18 @@ MaxPipelineLen = 256
 PipelineDeadlineUS = 0
 
 
+[Ram]
+
+# The maximum number of items (http responses and metadata) to be kept in RAM cache
+# If set to 0 RAM caching is disabled
+NumItems = 0
+
+# The maximum response body size in bytes to be cached in RAM
+# Choosing too big a value can increase RAM consumption to unacceptable values
+# Choosing too small a value will make more responses not to be cached in RAM even if they are very hot/popular
+MaxItemSize = 32768
+
+
 [Log]
 
 # ResponseCache has it's own log

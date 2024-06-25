@@ -53,6 +53,7 @@ func Init() {
 	// initialize cache
 	storageConfig := storage.StorageConfig{
 		Redis: *config.Redis,
+		Ram:   *config.Ram,
 	}
 	storage, err := storage.NewStorage(storageConfig)
 	if err != nil {
@@ -169,6 +170,11 @@ func signalHandler(c chan os.Signal) {
 		fmt.Printf("Sets: %d\n", counters.Sets.Load())
 		fmt.Printf("Updates: %d\n", counters.Updates.Load())
 		fmt.Printf("Revalidations: %d\n", counters.Revalidations.Load())
+		// ram counters
+		ramCounters := cache.storage.GetBackendCounters("ram")
+		fmt.Printf("RAM Hits: %d\n", ramCounters.Hits)
+		fmt.Printf("RAM Misses: %d\n", ramCounters.Misses)
+		fmt.Printf("RAM Hit Ratio: %d%%\n", int(ramCounters.HitRatio*100))
 		// error counters
 		storageCounters := cache.storage.GetCounters()
 		fmt.Printf("CacheErr: %d\n", storageCounters.CacheErr)

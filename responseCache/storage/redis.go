@@ -33,8 +33,9 @@ func (redis *RedisStorage) Get(key string, fields ...string) (storageObj *Storag
 		err = redisErr
 		return
 	}
-	if serFields["metadata"] == "" { // object was not found
-		return nil, rueidis.Nil
+	if len(serFields["metadata"]) < 1 { // object was not found
+		redis.counters.misses.Add(1)
+		return nil, ErrNotFound
 	}
 
 	storageObj = &StorageObject{}
@@ -53,7 +54,7 @@ func (redis *RedisStorage) Get(key string, fields ...string) (storageObj *Storag
 		storageObj.StatusCode = int(statusCode)
 	}
 
-	if serFields["headers"] != "" {
+	if len(serFields["headers"]) > 0 {
 		if err = Unserialize(serFields["headers"], &storageObj.Headers); err != nil {
 			redis.counters.serErr.Add(1)
 			return
@@ -62,6 +63,7 @@ func (redis *RedisStorage) Get(key string, fields ...string) (storageObj *Storag
 
 	storageObj.Body = serFields["body"]
 
+	redis.counters.hits.Add(1)
 	return
 }
 
