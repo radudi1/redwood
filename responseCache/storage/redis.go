@@ -9,8 +9,8 @@ import (
 )
 
 type RedisStorage struct {
-	wrapper  *wrappers.RedisWrapper
-	counters atomicCounters
+	Base
+	wrapper *wrappers.RedisWrapper
 }
 
 func NewRedisStorage(config wrappers.RedisConfig) (*RedisStorage, error) {
@@ -123,10 +123,6 @@ func (redis *RedisStorage) Update(key string, storageObj *StorageObject) error {
 		return redisErr
 	}
 	return nil
-}
-
-func (redis *RedisStorage) GetCounters() Counters {
-	return redis.counters.Get()
 }
 
 // Sets redis ttl for key according to metadata
