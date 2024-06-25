@@ -7,18 +7,12 @@ import (
 	"path/filepath"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/andybalholm/redwood/responseCache/storage/wrappers"
 )
 
 const defaultConfigPath = "/etc/redwood"
 const defaultConfigFilename = "responseCache.toml"
-
-type RedisConfig struct {
-	Url                string
-	DBNum              int
-	MaxNumConn         int
-	MaxPipelineLen     int
-	PipelineDeadlineUS int
-}
 
 type CacheConfig struct {
 	Enabled                bool
@@ -57,7 +51,7 @@ type StandardViolationsConfig struct {
 }
 
 type Config struct {
-	Redis              *RedisConfig
+	Redis              *wrappers.RedisConfig
 	Cache              *CacheConfig
 	Log                *LogConfig
 	Workers            *WorkersConfig

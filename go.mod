@@ -14,10 +14,10 @@ require (
 	github.com/miekg/dns v1.1.59
 	github.com/open-ch/ja3 v1.0.1
 	github.com/qri-io/starlib v0.5.0
-	github.com/redis/go-redis/v9 v9.5.1
 	github.com/redis/rueidis v1.0.38
 	github.com/redis/rueidis/rueidiscompat v1.0.38
 	github.com/remogatto/ftpget v0.0.0-20120222025949-5c3c8286a3b0
+	github.com/vmihailenco/msgpack v4.0.4+incompatible
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zeebo/xxh3 v1.0.2
 	go.starlark.net v0.0.0-20240411212711-9b43f0afd521
@@ -29,11 +29,16 @@ require (
 )
 
 require (
+	github.com/golang/protobuf v1.5.0 // indirect
+	google.golang.org/appengine v1.6.5 // indirect
+	google.golang.org/protobuf v1.33.0 // indirect
+)
+
+require (
 	github.com/PuerkitoBio/goquery v1.9.1 // indirect
 	github.com/andybalholm/go-bit v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/chzyer/readline v1.5.1 // indirect
-	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dlclark/regexp2 v1.11.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/dustmop/soup v1.1.2-0.20190516214245-38228baa104e // indirect

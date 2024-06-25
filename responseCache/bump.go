@@ -1,6 +1,7 @@
 package responseCache
 
 import (
+	"context"
 	"net/http"
 	"strings"
 )
@@ -12,7 +13,7 @@ var noBumpDomains map[string]struct{}
 // load nobump domains
 func bumpInit() {
 	if config.Cache.AutoAddToNoBump {
-		noBumpDomains, _ = CacheConn().SMembersMap(redisContext, noBumpDomainsKey).Result()
+		noBumpDomains, _ = cache.storage.GetRedisCompatConn().SMembersMap(context.Background(), noBumpDomainsKey).Result()
 	}
 }
 
