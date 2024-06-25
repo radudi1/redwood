@@ -8,6 +8,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/andybalholm/redwood/responseCache/storage"
 	"github.com/andybalholm/redwood/responseCache/storage/wrappers"
 )
 
@@ -52,6 +53,7 @@ type StandardViolationsConfig struct {
 
 type Config struct {
 	Redis              *wrappers.RedisConfig
+	Ram                *storage.RamStorageConfig
 	Cache              *CacheConfig
 	Log                *LogConfig
 	Workers            *WorkersConfig

@@ -10,24 +10,42 @@ import (
 
 type StorageConfig struct {
 	Redis wrappers.RedisConfig
+	Ram   RamStorageConfig
 }
 
 type Storage struct {
 	redis *RedisStorage
+	ram   *RamStorage
 }
 
 func NewStorage(config StorageConfig) (s *Storage, err error) {
 	s = &Storage{}
+	// redis
 	s.redis, err = NewRedisStorage(config.Redis)
 	if err != nil {
 		return
+	}
+	// ram
+	if config.Ram.NumItems > 0 {
+		s.ram, err = NewRamStorage(config.Ram)
+		if err != nil {
+			return
+		}
 	}
 	return
 }
 
 func (storage *Storage) Get(key string, fields ...string) (storageObj *StorageObject, err error) {
+	// ram
+	if storage.ram != nil {
+		storageObj, _ = storage.ram.Get(key, fields...)
+		if storageObj != nil {
+			return storageObj, nil
+		}
+	}
+	// redis
 	storageObj, err = storage.redis.Get(key, fields...)
-	if err != nil && err != rueidis.Nil {
+	if err != nil && err != ErrNotFound {
 		log.Println(err)
 		return
 	}
@@ -35,11 +53,21 @@ func (storage *Storage) Get(key string, fields ...string) (storageObj *StorageOb
 }
 
 func (storage *Storage) Set(key string, storageObj *StorageObject) error {
+	// ram
+	if storage.ram != nil {
+		storage.ram.Set(key, storageObj)
+	}
+	// redis
 	err := storage.redis.Set(key, storageObj)
 	return err
 }
 
 func (storage *Storage) Update(key string, storageObj *StorageObject) error {
+	// ram
+	if storage.ram != nil {
+		storage.ram.Update(key, storageObj)
+	}
+	// redis
 	err := storage.redis.Update(key, storageObj)
 	return err
 }
@@ -53,5 +81,21 @@ func (storage *Storage) GetRedisCompatConn() rueidiscompat.Cmdable {
 }
 
 func (storage *Storage) GetCounters() Counters {
-	return CounterSum(storage.redis.GetCounters())
+	counters := storage.redis.GetCounters()
+	if storage.ram != nil {
+		counters = CounterSum(counters, storage.ram.GetCounters())
+	}
+	return counters
+}
+
+func (storage *Storage) GetBackendCounters(backend string) Counters {
+	switch backend {
+	case "redis":
+		return storage.redis.GetCounters()
+	case "ram":
+		if storage.ram != nil {
+			return storage.ram.GetCounters()
+		}
+	}
+	return Counters{}
 }

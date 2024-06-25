@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"sync/atomic"
@@ -32,26 +33,40 @@ type StorageObject struct {
 type Counters struct {
 	SerErr   uint64
 	CacheErr uint64
+	Hits     uint64
+	Misses   uint64
+	HitRatio float64
 }
 
 type atomicCounters struct {
 	serErr   atomic.Uint64
 	cacheErr atomic.Uint64
+	hits     atomic.Uint64
+	misses   atomic.Uint64
 }
 
 type Base struct {
 	counters atomicCounters
 }
 
+var ErrNotFound = errors.New("storage object not found")
+var ErrTooBig = errors.New("storage object too big")
+
 func (base *Base) GetCounters() Counters {
 	return base.counters.Get()
 }
 
 func (counters *atomicCounters) Get() Counters {
-	return Counters{
+	c := Counters{
 		SerErr:   counters.serErr.Load(),
 		CacheErr: counters.cacheErr.Load(),
+		Hits:     counters.hits.Load(),
+		Misses:   counters.misses.Load(),
 	}
+	if numReqs := c.Hits + c.Misses; numReqs != 0 {
+		c.HitRatio = float64(c.Hits) / float64(numReqs)
+	}
+	return c
 }
 
 func CounterSum(counters ...Counters) Counters {

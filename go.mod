@@ -10,8 +10,9 @@ require (
 	github.com/dop251/goja v0.0.0-20250309171923-bcd7cc6bf64c
 	github.com/dop251/goja_nodejs v0.0.0-20250409162600-f7acab6894b0
 	github.com/golang/gddo v0.0.0-20210115222349-20d68f94ee1f
-	github.com/klauspost/compress v1.18.0
-	github.com/miekg/dns v1.1.65
+	github.com/hashicorp/golang-lru/v2 v2.0.7
+	github.com/klauspost/compress v1.17.8
+	github.com/miekg/dns v1.1.59
 	github.com/open-ch/ja3 v1.0.1
 	github.com/qri-io/starlib v0.5.0
 	github.com/redis/rueidis v1.0.38
