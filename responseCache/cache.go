@@ -134,11 +134,6 @@ func HashKey(key string) string {
 	return hiStr + loStr
 }
 
-// Returns Vary response header(s) as string
-func varyHeadersAsStr(respHeaders http.Header) string {
-	return strings.Join(respHeaders.Values("Vary"), ", ")
-}
-
 // Returns a string with all request headers mentioned in the vary string
 // These headers are concatenated and returned as a single string
 func varyVals(vary string, reqHeaders http.Header) string {

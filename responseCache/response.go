@@ -622,3 +622,8 @@ func getAge(headers http.Header) int {
 	}
 	return 0
 }
+
+// Returns Vary response header(s) as string
+func varyHeadersAsStr(respHeaders http.Header) string {
+	return strings.Join(respHeaders.Values("Vary"), ", ")
+}
