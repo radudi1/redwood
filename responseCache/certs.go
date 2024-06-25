@@ -1,6 +1,7 @@
 package responseCache
 
 import (
+	"context"
 	"crypto"
 	"crypto/tls"
 	"crypto/x509"
@@ -19,7 +20,7 @@ func IsCertValid(cert *x509.Certificate) bool {
 	if !config.Cache.Enabled { // respCache is actually disabled
 		return false
 	}
-	found, err := CacheConn().Exists(redisContext, GetCertKey(cert)).Result()
+	found, err := cache.storage.GetRedisCompatConn().Exists(context.Background(), GetCertKey(cert)).Result()
 	if err != nil {
 		log.Println(err)
 		return false
@@ -33,7 +34,7 @@ func GetFakeCert(serverCert *x509.Certificate, privateKey crypto.PrivateKey) (fa
 	}
 	fakeCert = tls.Certificate{}
 	found = false
-	cacheObjSer, redisErr := CacheConn().Get(redisContext, GetCertKey(serverCert)).Result()
+	cacheObjSer, redisErr := cache.storage.GetRedisCompatConn().Get(context.Background(), GetCertKey(serverCert)).Result()
 	if redisErr == rueidis.Nil {
 		return
 	}
@@ -63,7 +64,7 @@ func SetCertAsValid(serverCert *x509.Certificate, fakeCert *tls.Certificate) {
 	if ttl.Seconds() > float64(config.Cache.MaxAge) {
 		ttl = time.Duration(config.Cache.MaxAge) * time.Second
 	}
-	redisErr := CacheConn().Set(redisContext, GetCertKey(serverCert), fakeCertSer, ttl).Err()
+	redisErr := cache.storage.GetRedisCompatConn().Set(context.Background(), GetCertKey(serverCert), fakeCertSer, ttl).Err()
 	if redisErr != nil {
 		log.Println(redisErr)
 	}

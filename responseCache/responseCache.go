@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/andybalholm/redwood/responseCache/storage"
 	"github.com/radudi1/prioworkers"
 )
 
@@ -26,8 +27,11 @@ const (
 	srcRevalidate = 1
 )
 
-var logChan chan string
-var revalidateLogChan chan string
+var (
+	logChan           chan string
+	revalidateLogChan chan string
+	cache             Cache
+)
 
 func Init() {
 
@@ -46,8 +50,20 @@ func Init() {
 		go cacheLogWorker(config.Log.RevalidateLogFile, revalidateLogChan)
 	}
 
-	RedisInit()
+	// initialize cache
+	storageConfig := storage.StorageConfig{
+		Redis: *config.Redis,
+	}
+	storage, err := storage.NewStorage(storageConfig)
+	if err != nil {
+		config.Cache.Enabled = false
+		log.Println(err)
+		log.Println("!!! WARNING responseCache is disabled!")
+		return
+	}
+	cache = *NewCache(storage)
 
+	// initialize bumping exception mechanism
 	bumpInit()
 
 	// init httpClient (needed for revalidations)
@@ -154,8 +170,9 @@ func signalHandler(c chan os.Signal) {
 		fmt.Printf("Updates: %d\n", counters.Updates.Load())
 		fmt.Printf("Revalidations: %d\n", counters.Revalidations.Load())
 		// error counters
-		fmt.Printf("CacheErr: %d\n", cacheCounters.CacheErr.Load())
-		fmt.Printf("SerErr: %d\n", cacheCounters.SerErr.Load())
+		storageCounters := cache.storage.GetCounters()
+		fmt.Printf("CacheErr: %d\n", storageCounters.CacheErr)
+		fmt.Printf("SerErr: %d\n", storageCounters.SerErr)
 		fmt.Printf("EncodeErr: %d\n", counters.EncodeErr.Load())
 		fmt.Printf("ReadErr: %d\n", counters.ReadErr.Load())
 		fmt.Printf("WriteErr: %d\n", counters.WriteErr.Load())
