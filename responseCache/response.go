@@ -67,7 +67,7 @@ var (
 	httpClient *http.Client
 
 	ErrInvalidMaxAge     = errors.New("invalid maxAge value")
-	ErrComputeStaleTime  = errors.New("cannot compute stale time")
+	ErrComputeMaxAge     = errors.New("cannot compute maxAge")
 	ErrComputeExpireTime = errors.New("cannot compute expire time")
 )
 
@@ -509,21 +509,18 @@ func revalidateWorker(req *http.Request, respHeaders http.Header) {
 func setMetadataTimes(metadata *storage.StorageMetadata, respHeaders http.Header) error {
 	cacheControl := splitHeader(respHeaders, "cache-control", ",")
 
-	// set stale time
-	// object becomes stale when headers tell us (according to standards)
-	maxAge, err := getMaxAge(cacheControl, respHeaders, false)
-	if err != nil || maxAge <= 0 {
-		return ErrComputeStaleTime
-	}
-	metadata.Stale = NowPlusSeconds(maxAge)
-
 	// set expire time
 	// object can expire at stale time if we follow standards or at a later time if standard violations are enabled
-	maxAge, err = getMaxAge(cacheControl, respHeaders, config.StandardViolations.EnableStandardViolations)
+	maxAge, err := getMaxAge(cacheControl, respHeaders, config.StandardViolations.EnableStandardViolations)
 	if err != nil || maxAge <= 0 {
 		return ErrComputeExpireTime
 	}
 	metadata.Expires = NowPlusSeconds(maxAge)
+
+	// set stale time
+	// object becomes stale when headers tell us (according to standards)
+	maxAge, _ = getMaxAge(cacheControl, respHeaders, false)
+	metadata.Stale = NowPlusSeconds(maxAge)
 
 	// set revalidate deadline to be FreshPercentRevalidate percent of freshness time
 	// if we have "stale-while-revalidate" it will be used only if it's sooner
@@ -567,7 +564,7 @@ func getMaxAge(cacheControl map[string]string, respHeaders http.Header, withViol
 				}
 			}
 			// there are no headers present that we can't compute ttl on so we return the minimum default
-			return validateMaxAge(config.StandardViolations.DefaultAge, respHeaders, withViolations)
+			return config.StandardViolations.DefaultAge, nil
 		}
 		// if OverrideCacheControl is disabled we use this algo
 		if maxAge > 0 {
@@ -588,8 +585,11 @@ func getMaxAge(cacheControl map[string]string, respHeaders http.Header, withViol
 			return validateMaxAge(maxAge, respHeaders, withViolations)
 		}
 		// otherwise return from last-modified
-		return validateMaxAge(getLastModifiedTtl(respHeaders), respHeaders, withViolations)
+		if maxAge := getLastModifiedTtl(respHeaders); maxAge > 0 {
+			return validateMaxAge(maxAge, respHeaders, withViolations)
+		}
 	}
+	return 0, ErrComputeMaxAge
 }
 
 func validateMaxAge(maxAge int, respHeaders http.Header, withViolations bool) (int, error) {
