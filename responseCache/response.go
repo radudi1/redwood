@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"math"
@@ -66,6 +65,10 @@ var (
 	revalidateReqsMutex sync.Mutex
 
 	httpClient *http.Client
+
+	ErrInvalidMaxAge     = errors.New("invalid maxAge value")
+	ErrComputeStaleTime  = errors.New("cannot compute stale time")
+	ErrComputeExpireTime = errors.New("cannot compute expire time")
 )
 
 func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatches) {
@@ -137,6 +140,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 
 func fetchFromCache(req *http.Request, fields ...string) (cacheObj *CacheObject, foundAndValid bool) {
 	var err error
+	sentToRevalidation := false
 	cacheObj, err = cache.Get(req, fields...)
 	if err != nil {
 		foundAndValid = false
@@ -149,14 +153,18 @@ func fetchFromCache(req *http.Request, fields ...string) (cacheObj *CacheObject,
 				return
 			}
 			// object is stale but it's within revalidation deadline
+			sentToRevalidation = true
 			go revalidateWorker(req.Clone(context.Background()), cacheObj.Headers.Clone())
 		} else { // serve stale is enabled - we serve and revalidate
+			sentToRevalidation = true
 			go revalidateWorker(req.Clone(context.Background()), cacheObj.Headers.Clone())
 		}
 	}
 	// if we get here we can serve the object and we also update ttl
 	foundAndValid = true
-	go updateTtlWorker(cacheObj.Metadata, *req.Clone(context.Background()), cacheObj.Headers)
+	if !sentToRevalidation {
+		go updateTtlWorker(cacheObj.Metadata, *req.Clone(context.Background()), cacheObj.Headers)
+	}
 	return
 }
 
@@ -214,7 +222,7 @@ func sendResponse(req *http.Request, cacheObj *CacheObject, toClientStatusCode i
 			} else {
 				cacheObj.Headers.Set("Content-Encoding", encoding)
 			}
-			cacheObj.Headers.Set("Content-Length", fmt.Sprint(len(cacheObj.Body)))
+			cacheObj.Headers.Set("Content-Length", strconv.Itoa(len(cacheObj.Body)))
 		}
 	}
 
@@ -401,7 +409,21 @@ func updateTtlWorker(cachedMetadata storage.StorageMetadata, req http.Request, r
 		defer prioworkers.WorkEnd(workerId)
 	}
 
-	setMetadataTimes(&cachedMetadata, respHeaders)
+	newMetadata := cachedMetadata
+	if setMetadataTimes(&newMetadata, respHeaders) != nil {
+		return
+	}
+
+	// if we can't extend expiration time at all there's no point to update
+	if cachedMetadata.Expires.Equal(newMetadata.Expires) {
+		return
+	}
+	// if we can't extend expiration time with at least ExpirePercentUpdate percent then we don't update
+	cachedExpireSeconds := cachedMetadata.Expires.Sub(cachedMetadata.Updated).Seconds()
+	newExpireSeconds := newMetadata.Expires.Sub(cachedMetadata.Updated).Seconds()
+	if float64((newExpireSeconds-cachedExpireSeconds))/cachedExpireSeconds < (float64(config.Cache.ExpirePercentUpdate) / 100) {
+		return
+	}
 
 	cache.Update(&req, cachedMetadata)
 
@@ -414,6 +436,7 @@ func revalidateWorker(req *http.Request, respHeaders http.Header) {
 		workerId := prioworkers.WorkStart(revalidateWPrio)
 		defer prioworkers.WorkEnd(workerId)
 	}
+
 	// if this is request is currently revalidating (by another goroutine) we skip it
 	cacheKey := getCacheKey(req, respHeaders.Get("Vary"))
 	revalidateReqsMutex.Lock()
@@ -421,11 +444,20 @@ func revalidateWorker(req *http.Request, respHeaders http.Header) {
 		revalidateReqsMutex.Unlock()
 		return
 	}
+
 	// add current request to currently revalidating list
 	revalidateReqs[cacheKey] = struct{}{}
 	revalidateReqsMutex.Unlock()
+	defer func() {
+		// remove request from currently revalidating list
+		revalidateReqsMutex.Lock()
+		delete(revalidateReqs, cacheKey)
+		revalidateReqsMutex.Unlock()
+	}()
+
 	// update stats
 	counters.Revalidations.Add(1)
+
 	// conditional validation if possible
 	req.Header.Del("If-None-Match")
 	req.Header.Del("If-Modified-Since")
@@ -434,6 +466,7 @@ func revalidateWorker(req *http.Request, respHeaders http.Header) {
 	} else if respHeaders.Get("Date") != "" {
 		req.Header.Add("If-Modified-Since", respHeaders.Get("Date"))
 	}
+
 	// do request
 	if req.ContentLength == 0 {
 		req.Body.Close()
@@ -442,28 +475,34 @@ func revalidateWorker(req *http.Request, respHeaders http.Header) {
 	reqURI := req.RequestURI // URI will have to be restored before caching because it's used to compute cache key
 	req.RequestURI = ""      // it is required by library that RequestURI is not set
 	resp, err := httpClient.Do(req)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
-		log.Println("Error making HTTP request:", err)
+		log.Println("Error making HTTP (revalidate) request:", err)
 		return
 	}
+
 	// process response
 	req.RequestURI = reqURI // restore URI before caching because it's used to compute cache key
 	req.Header.Del("If-None-Match")
 	req.Header.Del("If-Modified-Since")
 	if resp.StatusCode == http.StatusNotModified {
+		// update cache metadata
 		metadata := storage.StorageMetadata{
 			Updated: time.Now(),
 			Vary:    varyHeadersAsStr(resp.Header),
 		}
-		go updateTtlWorker(metadata, *req.Clone(context.Background()), resp.Header)
+		if setMetadataTimes(&metadata, respHeaders) != nil {
+			return
+		}
+		if err := cache.Update(req, metadata); err != nil {
+			log.Println("Error while updating cache (revalidate):", err)
+		}
 	} else {
+		// set new response
 		set(req, resp, &stopWatches{}, srcRevalidate)
 	}
-	resp.Body.Close()
-	// remove request from currently revalidating list
-	revalidateReqsMutex.Lock()
-	delete(revalidateReqs, cacheKey)
-	revalidateReqsMutex.Unlock()
 
 }
 
@@ -474,7 +513,7 @@ func setMetadataTimes(metadata *storage.StorageMetadata, respHeaders http.Header
 	// object becomes stale when headers tell us (according to standards)
 	maxAge, err := getMaxAge(cacheControl, respHeaders, false)
 	if err != nil || maxAge <= 0 {
-		return errors.New("cannot compute stale time")
+		return ErrComputeStaleTime
 	}
 	metadata.Stale = NowPlusSeconds(maxAge)
 
@@ -482,7 +521,7 @@ func setMetadataTimes(metadata *storage.StorageMetadata, respHeaders http.Header
 	// object can expire at stale time if we follow standards or at a later time if standard violations are enabled
 	maxAge, err = getMaxAge(cacheControl, respHeaders, config.StandardViolations.EnableStandardViolations)
 	if err != nil || maxAge <= 0 {
-		return errors.New("cannot compute expire time")
+		return ErrComputeExpireTime
 	}
 	metadata.Expires = NowPlusSeconds(maxAge)
 
@@ -568,7 +607,7 @@ func validateMaxAge(maxAge int, respHeaders http.Header, withViolations bool) (i
 	}
 	// make sure maxAge is within range
 	if maxAge < 1 {
-		return maxAge, fmt.Errorf("invalid maxAge value")
+		return maxAge, ErrInvalidMaxAge
 	}
 	// cap maxAge to config setting
 	maxAge = min(maxAge, config.Cache.MaxAge)

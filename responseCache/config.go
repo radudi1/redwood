@@ -24,6 +24,7 @@ type CacheConfig struct {
 	DeflateLevel           int
 	AgeDivisor             int
 	FreshPercentRevalidate int
+	ExpirePercentUpdate    int
 	RestrictedMaxAge       int
 	RestrictedMimePrefixes []string
 	AutoAddToNoBump        bool
