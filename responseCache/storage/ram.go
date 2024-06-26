@@ -58,7 +58,6 @@ func (ram *RamStorage) Update(key string, storageObj *StorageObject) error {
 		return ErrNotFound
 	}
 	obj.Metadata = storageObj.Metadata
-	ram.cache.Add(key, obj)
 	return nil
 }
 
