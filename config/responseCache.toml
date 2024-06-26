@@ -19,6 +19,15 @@ AgeDivisor = 10
 # Values less than 1 are invalid
 FreshPercentRevalidate = 80
 
+# Cached object ttls are capped (by MaxAge and RestrictedMaxAge)
+# If cache-control (or other headers) allow longer ttls if we don't update their ttls they will eventually expire when cap is reached
+# even if server allowed longer caching. In order to prevent ttls are recomputed on each cache hit and we update the cache ttl to the new value
+# In order to prevent excesive load on cache (redis etc.) ExpirePercentUpdate sets a limit on when to update or not a cache ttl
+# If new ttl would extend expire time with at least ExpirePercentUpdate % of object age a cache ttl update will occur. Otherwise it will not.
+# Set to 100 to never update cache ttls - cached objects might expire before server ttl and they will be refetched - possibly reducing hit ratio
+# Set to 0 to always update cache ttl - increased cache (redis etc.) load
+ExpirePercentUpdate = 50
+
 # For some mimetypes (eg: video) we can set lower caching ttl.
 # RestrictedMimePrefixes is an array of these mimetypes and RestrictedMaxAge is the maximum cache time in seconds
 RestrictedMaxAge = 3600
