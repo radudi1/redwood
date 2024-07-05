@@ -45,9 +45,12 @@ func (storage *Storage) Get(key string, fields ...string) (storageObj *StorageOb
 	}
 	// redis
 	storageObj, err = storage.redis.Get(key, fields...)
-	if err != nil && err != ErrNotFound {
-		log.Println(err)
-		return
+	if err != nil {
+		if err != ErrNotFound {
+			log.Println(err)
+		}
+	} else if storage.ram != nil { // cache redis hit to ram
+		storage.ram.Set(key, storageObj)
 	}
 	return
 }
