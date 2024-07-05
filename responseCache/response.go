@@ -335,7 +335,7 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 		// we check that we have specific cache control indications that we can cache
 		// and that there are no indications that the response is specific to a certain user/session/etc.
 		if (!MapHasKey(cacheControl, "s-maxage") && !MapHasKey(cacheControl, "max-age")) ||
-			cacheControl["max-age"] == "0" || req.Header.Get("Cookie") != "" || resp.Header.Get("Set-Cookie") != "" {
+			req.Header.Get("Cookie") != "" || resp.Header.Get("Set-Cookie") != "" {
 			logStatus = "UC_CACHECTRL"
 			return
 		}
