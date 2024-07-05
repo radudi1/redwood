@@ -230,7 +230,7 @@ func sendResponse(req *http.Request, cacheObj *CacheObject, toClientStatusCode i
 	w.WriteHeader(toClientStatusCode)
 
 	// send response body
-	n, writeErr := w.Write([]byte(cacheObj.Body))
+	n, writeErr := io.WriteString(w, cacheObj.Body)
 	if writeErr != nil {
 		counters.WriteErr.Add(1)
 		log.Println(writeErr)
@@ -270,7 +270,7 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 	stats.setSw = stopwatch.Start()
 	defer stats.setSw.Stop()
 
-	var body []byte
+	var body strings.Builder
 	var err error
 
 	// create metadata
@@ -280,7 +280,7 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 	defer (func() {
 		if logStatus == "MISS" {
 			counters.Misses.Add(1)
-			counters.MissBytes.Add(uint64(len(body)))
+			counters.MissBytes.Add(uint64(body.Len()))
 		} else {
 			counters.Uncacheable.Add(1)
 			if resp.ContentLength > 0 {
@@ -360,7 +360,8 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 		R: resp.Body,
 		N: int64(sizeLimit),
 	}
-	body, err = io.ReadAll(lr)
+	_, err = io.Copy(&body, lr)
+	// body, err = io.ReadAll(lr)
 	// Servers that use broken chunked Transfer-Encoding can give us unexpected EOFs,
 	// even if we got all the content.
 	if err == io.ErrUnexpectedEOF && resp.ContentLength == -1 {
@@ -374,19 +375,19 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 	}
 	if lr.N == 0 {
 		// We read maxLen without reaching the end.
-		resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), resp.Body))
+		resp.Body = io.NopCloser(io.MultiReader(strings.NewReader(body.String()), resp.Body))
 		logStatus = "UC_TOOBIG"
 		return
 	}
-	resp.Body = io.NopCloser(bytes.NewReader(body))
-	if len(body) >= sizeLimit {
+	resp.Body = io.NopCloser(strings.NewReader(body.String()))
+	if body.Len() >= sizeLimit {
 		logStatus = "UC_TOOBIG"
 		return
 	}
 
 	// send to cache
 	metadata.Vary = varyHeadersAsStr(resp.Header)
-	go setWorker(resp.StatusCode, metadata, req.Clone(context.Background()), resp.Header.Clone(), string(body))
+	go setWorker(resp.StatusCode, metadata, req.Clone(context.Background()), resp.Header.Clone(), body.String())
 
 	logStatus = "MISS"
 
