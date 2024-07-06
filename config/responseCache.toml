@@ -3,6 +3,10 @@
 # If this is set to false caching will be completely disabled and you can ignore the rest of this file
 Enabled = true
 
+# Number of TLS sessions that will be kept in RAM
+# This is used for TLS session resumption in order to speed up TLS setup
+TlsSessionCacheSize = 10000
+
 # If http response allows longer caching it will be capped to this many seconds.
 MaxAge = 604800
 

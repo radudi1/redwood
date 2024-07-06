@@ -306,11 +306,10 @@ func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request) 
 	}
 
 	serverConnConfig := &tls.Config{
-		ServerName:         session.SNI,
-		InsecureSkipVerify: true,
-		CurvePreferences:   curves,
-		Renegotiation:      tls.RenegotiateOnceAsClient,
-		CipherSuites:       ciphers,
+		ServerName:             session.SNI,
+		InsecureSkipVerify:     true,
+		SessionTicketsDisabled: false,
+		ClientSessionCache:     responseCache.GetTlsSessionCache(),
 	}
 	clientSupportsHTTP2 := false
 	if clientHelloInfo != nil {
@@ -366,7 +365,12 @@ func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request) 
 
 		d := &tls.Dialer{
 			NetDialer: dialer,
-			Config:    serverConnConfig,
+			Config: &tls.Config{
+				ServerName:             session.SNI,
+				RootCAs:                certPoolWith(serverConn.ConnectionState().PeerCertificates),
+				SessionTicketsDisabled: false,
+				ClientSessionCache:     responseCache.GetTlsSessionCache(),
+			},
 		}
 		if !valid {
 			serverConnConfig.InsecureSkipVerify = true

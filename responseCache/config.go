@@ -17,6 +17,7 @@ const defaultConfigFilename = "responseCache.toml"
 
 type CacheConfig struct {
 	Enabled                bool
+	TlsSessionCacheSize    int
 	MaxAge                 int
 	MaxSize                int
 	BrotliLevel            int
