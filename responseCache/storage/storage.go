@@ -3,13 +3,12 @@ package storage
 import (
 	"log"
 
-	"github.com/andybalholm/redwood/responseCache/storage/wrappers"
 	"github.com/redis/rueidis"
 	"github.com/redis/rueidis/rueidiscompat"
 )
 
 type StorageConfig struct {
-	Redis wrappers.RedisConfig
+	Redis RedisStorageConfig
 	Ram   RamStorageConfig
 }
 

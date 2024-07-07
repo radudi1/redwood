@@ -8,8 +8,8 @@ import (
 )
 
 type RamStorageConfig struct {
-	NumItems    int
-	MaxItemSize int
+	StorageBackendConfig
+	NumItems int
 }
 
 type RamStorage struct {
@@ -24,10 +24,12 @@ func NewRamStorage(config RamStorageConfig) (*RamStorage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &RamStorage{
+	ram := &RamStorage{
 		config: config,
 		cache:  cache,
-	}, nil
+	}
+	ram.Base.config = ram.config.StorageBackendConfig
+	return ram, nil
 }
 
 func (ram *RamStorage) Get(key string, fields ...string) (storageObj *StorageObject, err error) {
@@ -41,8 +43,8 @@ func (ram *RamStorage) Get(key string, fields ...string) (storageObj *StorageObj
 }
 
 func (ram *RamStorage) Set(key string, storageObj *StorageObject) error {
-	if len(storageObj.Body) > ram.config.MaxItemSize {
-		return ErrTooBig
+	if err := ram.IsCacheable(storageObj); err != nil {
+		return err
 	}
 	ram.cache.Add(key, storageObj)
 	ram.numSetsSinceGC.Add(1)

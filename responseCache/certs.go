@@ -75,8 +75,8 @@ func SetCertAsValid(serverCert *x509.Certificate, fakeCert *tls.Certificate) {
 	if ttl <= 0 { // certificate has expired and therefore we do NOT cache it
 		return
 	}
-	if ttl.Seconds() > float64(config.Cache.MaxAge) {
-		ttl = time.Duration(config.Cache.MaxAge) * time.Second
+	if ttl.Seconds() > float64(config.Cache.MaxTtl) {
+		ttl = time.Duration(config.Cache.MaxTtl) * time.Second
 	}
 	metadata := storage.StorageMetadata{
 		Updated: time.Now(),
@@ -108,8 +108,8 @@ func SetDomainCert(serverCert *x509.Certificate, fakeCert *tls.Certificate) {
 	if ttl <= 0 { // certificate has expired and therefore we do NOT cache it
 		return
 	}
-	if ttl.Seconds() > float64(config.Cache.MaxAge) {
-		ttl = time.Duration(config.Cache.MaxAge) * time.Second
+	if ttl.Seconds() > float64(config.Cache.MaxTtl) {
+		ttl = time.Duration(config.Cache.MaxTtl) * time.Second
 	}
 	metadata := storage.StorageMetadata{
 		Updated: time.Now(),

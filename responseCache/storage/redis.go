@@ -8,15 +8,24 @@ import (
 	"github.com/andybalholm/redwood/responseCache/storage/wrappers"
 )
 
+type RedisStorageConfig struct {
+	StorageBackendConfig
+	wrappers.RedisConfig
+}
+
 type RedisStorage struct {
 	Base
+	config  RedisStorageConfig
 	wrapper *wrappers.RedisWrapper
 }
 
-func NewRedisStorage(config wrappers.RedisConfig) (*RedisStorage, error) {
-	r := RedisStorage{}
+func NewRedisStorage(config RedisStorageConfig) (*RedisStorage, error) {
+	r := RedisStorage{
+		config: config,
+	}
+	r.Base.config = r.config.StorageBackendConfig
 	var err error
-	r.wrapper, err = wrappers.NewRedisWrapper(config)
+	r.wrapper, err = wrappers.NewRedisWrapper(config.RedisConfig)
 	return &r, err
 }
 
@@ -68,6 +77,10 @@ func (redis *RedisStorage) Get(key string, fields ...string) (storageObj *Storag
 }
 
 func (redis *RedisStorage) Set(key string, storageObj *StorageObject) error {
+
+	if err := redis.IsCacheable(storageObj); err != nil {
+		return err
+	}
 
 	metadataSer, serErr := Serialize(storageObj.Metadata)
 	if serErr != nil {

@@ -46,11 +46,25 @@ type atomicCounters struct {
 }
 
 type Base struct {
+	config   StorageBackendConfig
 	counters atomicCounters
 }
 
-var ErrNotFound = errors.New("storage object not found")
-var ErrTooBig = errors.New("storage object too big")
+var (
+	ErrNotFound    = errors.New("storage object not found")
+	ErrTooBig      = errors.New("storage object too big")
+	ErrTtlTooSmall = errors.New("ttl is smaller than minimum backend storage ttl")
+)
+
+func (base *Base) IsCacheable(storageObj *StorageObject) error {
+	if base.config.MinTtl > 0 && storageObj.Metadata.Expires.Unix()-time.Now().Unix() < int64(base.config.MinTtl) {
+		return ErrTtlTooSmall
+	}
+	if len(storageObj.Body) > base.config.MaxBodySize {
+		return ErrTooBig
+	}
+	return nil
+}
 
 func (base *Base) GetCounters() Counters {
 	return base.counters.Get()
