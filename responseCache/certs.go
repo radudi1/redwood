@@ -29,7 +29,7 @@ func GetFakeCert(serverCert *x509.Certificate, privateKey crypto.PrivateKey) *tl
 	if !config.Cache.Enabled { // respCache is actually disabled
 		return nil
 	}
-	cacheObj, err := cache.storage.Get(GetCertKey(serverCert), "metadata", "body")
+	cacheObj, _, err := cache.storage.Get(GetCertKey(serverCert), "metadata", "body")
 	if err != nil {
 		if err != storage.ErrNotFound {
 			log.Println(err)
@@ -50,7 +50,7 @@ func GetDomainFakeCert(domain string, privateKey crypto.PrivateKey) *tls.Certifi
 	if !config.Cache.Enabled { // respCache is actually disabled
 		return nil
 	}
-	cacheObj, err := cache.storage.Get(GetDomainCertKey(domain), "metadata", "body")
+	cacheObj, _, err := cache.storage.Get(GetDomainCertKey(domain), "metadata", "body")
 	if err != nil {
 		if err != storage.ErrNotFound {
 			log.Println(err)

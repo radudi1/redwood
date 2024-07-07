@@ -7,6 +7,11 @@ import (
 	"github.com/redis/rueidis/rueidiscompat"
 )
 
+const (
+	RedisBackend = 1
+	RamBackend   = 2
+)
+
 type StorageConfig struct {
 	Redis RedisStorageConfig
 	Ram   RamStorageConfig
@@ -34,12 +39,12 @@ func NewStorage(config StorageConfig) (s *Storage, err error) {
 	return
 }
 
-func (storage *Storage) Get(key string, fields ...string) (storageObj *StorageObject, err error) {
+func (storage *Storage) Get(key string, fields ...string) (storageObj *StorageObject, fromBackend int, err error) {
 	// ram
 	if storage.ram != nil {
 		storageObj, _ = storage.ram.Get(key, fields...)
 		if storageObj != nil {
-			return storageObj, nil
+			return storageObj, RamBackend, nil
 		}
 	}
 	// redis
@@ -51,6 +56,7 @@ func (storage *Storage) Get(key string, fields ...string) (storageObj *StorageOb
 	} else if storage.ram != nil { // cache redis hit to ram
 		storage.ram.Set(key, storageObj)
 	}
+	fromBackend = RedisBackend
 	return
 }
 
