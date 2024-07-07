@@ -14,6 +14,7 @@ type CacheObject struct {
 	storage.StorageObject
 	cacheKey         string
 	metadataCacheKey string
+	backends         int
 }
 
 type Cache struct {
@@ -40,10 +41,11 @@ func (cache *Cache) Get(req *http.Request, fields ...string) (cacheObj *CacheObj
 		fields = append(fields, "metadata")
 	}
 	var storageObj *storage.StorageObject
+	var fromBackend int
 
 	// fetch initial object - could be real object or metadata-only
 	metadataKey := getCacheKey(req, "")
-	storageObj, err = cache.storage.Get(metadataKey, fields...)
+	storageObj, fromBackend, err = cache.storage.Get(metadataKey, fields...)
 	if err != nil {
 		return
 	}
@@ -52,6 +54,7 @@ func (cache *Cache) Get(req *http.Request, fields ...string) (cacheObj *CacheObj
 	cacheObj = &CacheObject{
 		StorageObject:    *storageObj,
 		metadataCacheKey: metadataKey,
+		backends:         fromBackend,
 	}
 	if cacheObj.Metadata.Vary == "" {
 		cacheObj.cacheKey = metadataKey
@@ -60,12 +63,13 @@ func (cache *Cache) Get(req *http.Request, fields ...string) (cacheObj *CacheObj
 
 	// if it's not the real object get the real object and return it
 	cacheKey := getCacheKey(req, varyVals(cacheObj.Metadata.Vary, req.Header))
-	storageObj, err = cache.storage.Get(cacheKey, fields...)
+	storageObj, fromBackend, err = cache.storage.Get(cacheKey, fields...)
 	if err != nil {
 		return
 	}
 	cacheObj.StorageObject = *storageObj
 	cacheObj.cacheKey = cacheKey
+	cacheObj.backends = fromBackend
 
 	return
 }

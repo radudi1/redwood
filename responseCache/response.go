@@ -174,12 +174,16 @@ func sendResponse(req *http.Request, cacheObj *CacheObject, toClientStatusCode i
 	counters.Hits.Add(1)
 	counters.HitBytes.Add(uint64(len(cacheObj.Headers) + len(cacheObj.Body)))
 
-	// set log status (will be modified if necessary)
+	// set log status (will be modified if necessary) and hit source
+	hitSrc := "_REDIS"
+	if (cacheObj.backends & storage.RamBackend) != 0 {
+		hitSrc = "_RAM"
+	}
 	logStatus := "HIT"
 
 	// log on exit
 	defer func() {
-		cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, logStatus, cacheObj.cacheKey, stats)
+		cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, logStatus+hitSrc, cacheObj.cacheKey, stats)
 	}()
 
 	// if not modified there's nothing there to send except status code
