@@ -9,7 +9,6 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/andybalholm/redwood/responseCache/storage"
-	"github.com/andybalholm/redwood/responseCache/storage/wrappers"
 )
 
 const defaultConfigPath = "/etc/redwood"
@@ -18,8 +17,9 @@ const defaultConfigFilename = "responseCache.toml"
 type CacheConfig struct {
 	Enabled                bool
 	TlsSessionCacheSize    int
-	MaxAge                 int
-	MaxSize                int
+	MinTtl                 int
+	MaxTtl                 int
+	MaxBodySize            int
 	BrotliLevel            int
 	GZIPLevel              int
 	DeflateLevel           int
@@ -54,7 +54,7 @@ type StandardViolationsConfig struct {
 }
 
 type Config struct {
-	Redis              *wrappers.RedisConfig
+	Redis              *storage.RedisStorageConfig
 	Ram                *storage.RamStorageConfig
 	Cache              *CacheConfig
 	Log                *LogConfig
@@ -82,6 +82,10 @@ func loadConfig() {
 
 	// validations
 	validateConfInt(&config.Cache.FreshPercentRevalidate, 1, math.MaxInt, 100)
+
+	// computations
+	config.Cache.MinTtl = max(config.Ram.MinTtl, config.Redis.MinTtl)
+	config.Cache.MaxBodySize = max(config.Ram.MaxBodySize, config.Redis.MaxBodySize)
 
 }
 

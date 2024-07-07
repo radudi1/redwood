@@ -8,10 +8,7 @@ Enabled = true
 TlsSessionCacheSize = 10000
 
 # If http response allows longer caching it will be capped to this many seconds.
-MaxAge = 604800
-
-# If response is larger than this many bytes it will not be cached
-MaxSize = 33554432
+MaxTtl = 604800
 
 # If don't have specific caching indications (eg: cache-control) we set expiration time to Age ("last-modified" header) / AgeDivisor
 AgeDivisor = 10
@@ -57,6 +54,13 @@ Url = "redis://redishost:6379"
 # Redis DB number
 DBNum = 0
 
+# If the response expires earlier than this many seconds from now then it will not be cached to Redis
+# If set to 0 all responses will be cached (if cacheable) to Redis
+MinTtl = 600
+
+# If response body is larger than this many bytes it will not be cached to redis
+MaxBodySize = 33554432
+
 # Maximum number of parallel connections to Redis
 # New connections to redis are initiated and closed as needed up to this number
 # The number should be a power of 2 - if not it will be floored to the closest power of 2
@@ -80,12 +84,23 @@ PipelineDeadlineUS = 0
 
 # The maximum number of items (http responses and metadata) to be kept in RAM cache
 # If set to 0 RAM caching is disabled
+# Beware that responses with Vary header actually have 2 records in cache.
+# Beware that fake certificates are also cached.
+# Make sure you take all this into account when setting this value
 NumItems = 0
+
+# If the response expires earlier than this many seconds from now then it will not be cached to Ram
+# If set to 0 all responses will be cached (if cacheable) to Ram
+# WARNING!!! When you set this value lower than Redis MinTtl you may get into a situation
+# where a cached response may be evicted from RAM and older response still exists in Redis.
+# The older response will be served to client!!!
+# Choose your values wisely!
+MinTtl = 0
 
 # The maximum response body size in bytes to be cached in RAM
 # Choosing too big a value can increase RAM consumption to unacceptable values
 # Choosing too small a value will make more responses not to be cached in RAM even if they are very hot/popular
-MaxItemSize = 32768
+MaxBodySize = 32768
 
 
 [Log]

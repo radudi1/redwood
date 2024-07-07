@@ -340,7 +340,7 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 			return
 		}
 	}
-	sizeLimit := int(math.Min(float64(config.Cache.MaxSize), 512*1024*1024)) // redis max object size is 512 MB
+	sizeLimit := int(math.Min(float64(config.Cache.MaxBodySize), 512*1024*1024)) // redis max object size is 512 MB
 	if resp.ContentLength > int64(sizeLimit) {
 		logStatus = "UC_TOOBIG"
 		return
@@ -398,8 +398,9 @@ func setWorker(statusCode int, metadata storage.StorageMetadata, req *http.Reque
 		workerId := prioworkers.WorkStart(mainPrio)
 		defer prioworkers.WorkEnd(workerId)
 	}
-	if err := cache.Set(statusCode, metadata, req, respHeaders, body); err != nil {
+	if err := cache.Set(statusCode, metadata, req, respHeaders, body); err != nil && err != storage.ErrTtlTooSmall && err != storage.ErrTooBig {
 		log.Println("Error setting cache object for ", req.RequestURI)
+		return
 	}
 	counters.Sets.Add(1)
 }
@@ -512,16 +513,16 @@ func setMetadataTimes(metadata *storage.StorageMetadata, respHeaders http.Header
 
 	// set expire time
 	// object can expire at stale time if we follow standards or at a later time if standard violations are enabled
-	maxAge, err := getMaxAge(cacheControl, respHeaders, config.StandardViolations.EnableStandardViolations)
-	if err != nil || maxAge <= 0 {
+	ttl, err := getTtl(cacheControl, respHeaders, config.StandardViolations.EnableStandardViolations)
+	if err != nil || ttl <= 0 {
 		return ErrComputeExpireTime
 	}
-	metadata.Expires = NowPlusSeconds(maxAge)
+	metadata.Expires = NowPlusSeconds(ttl)
 
 	// set stale time
 	// object becomes stale when headers tell us (according to standards)
-	maxAge, _ = getMaxAge(cacheControl, respHeaders, false)
-	metadata.Stale = NowPlusSeconds(maxAge)
+	ttl, _ = getTtl(cacheControl, respHeaders, false)
+	metadata.Stale = NowPlusSeconds(ttl)
 
 	// set revalidate deadline to be FreshPercentRevalidate percent of freshness time
 	// if we have "stale-while-revalidate" it will be used only if it's sooner
@@ -541,9 +542,9 @@ func setMetadataTimes(metadata *storage.StorageMetadata, respHeaders http.Header
 	return nil
 }
 
-func getMaxAge(cacheControl map[string]string, respHeaders http.Header, withViolations bool) (int, error) {
+func getTtl(cacheControl map[string]string, respHeaders http.Header, withViolations bool) (int, error) {
 	if MapHasKey(cacheControl, "immutable") {
-		return validateMaxAge(config.Cache.MaxAge, respHeaders, withViolations)
+		return validateTtl(config.Cache.MaxTtl, respHeaders, withViolations)
 	}
 	// if standard violation is enabled use this algorithm
 	if withViolations {
@@ -552,16 +553,16 @@ func getMaxAge(cacheControl map[string]string, respHeaders http.Header, withViol
 		if config.StandardViolations.OverrideCacheControl {
 			maxAge = max(maxAge, min(getLastModifiedTtl(respHeaders), config.StandardViolations.OverrideCacheControlMaxAge))
 			if maxAge > 0 {
-				return validateMaxAge(maxAge, respHeaders, withViolations)
+				return validateTtl(maxAge, respHeaders, withViolations)
 			}
 			// no cache-control and no last-modified
 			if age := getAge(respHeaders); age > 0 { // if age header is present we compute ttl based on that
-				return validateMaxAge(age/config.Cache.AgeDivisor, respHeaders, withViolations)
+				return validateTtl(age/config.Cache.AgeDivisor, respHeaders, withViolations)
 			}
 			// we resort to expire unless it is overriden
 			if !config.StandardViolations.OverrideExpire {
 				if maxAge = getExpiresTtl(respHeaders); maxAge > 0 {
-					return validateMaxAge(maxAge, respHeaders, withViolations)
+					return validateTtl(maxAge, respHeaders, withViolations)
 				}
 			}
 			// there are no headers present that we can't compute ttl on so we return the minimum default
@@ -569,31 +570,31 @@ func getMaxAge(cacheControl map[string]string, respHeaders http.Header, withViol
 		}
 		// if OverrideCacheControl is disabled we use this algo
 		if maxAge > 0 {
-			return validateMaxAge(maxAge, respHeaders, withViolations)
+			return validateTtl(maxAge, respHeaders, withViolations)
 		}
 		if !config.StandardViolations.OverrideExpire {
 			if maxAge = getExpiresTtl(respHeaders); maxAge > 0 {
-				return validateMaxAge(maxAge, respHeaders, withViolations)
+				return validateTtl(maxAge, respHeaders, withViolations)
 			}
 		}
-		return validateMaxAge(getLastModifiedTtl(respHeaders), respHeaders, withViolations)
+		return validateTtl(getLastModifiedTtl(respHeaders), respHeaders, withViolations)
 	} else { // standard violations are not enabled
 		// return from cache-control if possible
 		if maxAge := getCacheControlTtl(cacheControl, withViolations); maxAge > 0 {
-			return validateMaxAge(maxAge, respHeaders, withViolations)
+			return validateTtl(maxAge, respHeaders, withViolations)
 		}
 		if maxAge := getExpiresTtl(respHeaders); maxAge > 0 {
-			return validateMaxAge(maxAge, respHeaders, withViolations)
+			return validateTtl(maxAge, respHeaders, withViolations)
 		}
 		// otherwise return from last-modified
 		if maxAge := getLastModifiedTtl(respHeaders); maxAge > 0 {
-			return validateMaxAge(maxAge, respHeaders, withViolations)
+			return validateTtl(maxAge, respHeaders, withViolations)
 		}
 	}
 	return 0, ErrComputeMaxAge
 }
 
-func validateMaxAge(maxAge int, respHeaders http.Header, withViolations bool) (int, error) {
+func validateTtl(maxAge int, respHeaders http.Header, withViolations bool) (int, error) {
 	// if violations are enabled we already apply different heuristics to determine ttl - therefore we ignore age here
 	// otherwise age must be substracted
 	if !withViolations {
@@ -611,7 +612,7 @@ func validateMaxAge(maxAge int, respHeaders http.Header, withViolations bool) (i
 		return maxAge, ErrInvalidMaxAge
 	}
 	// cap maxAge to config setting
-	maxAge = min(maxAge, config.Cache.MaxAge)
+	maxAge = min(maxAge, config.Cache.MaxTtl)
 	return maxAge, nil
 }
 
