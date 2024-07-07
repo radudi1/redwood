@@ -652,15 +652,16 @@ func getLastModifiedTtl(headers http.Header) int {
 }
 
 func getAge(headers http.Header) int {
-	tDate, err := time.Parse(time.RFC1123, headers.Get("Date"))
-	if err == nil {
-		return int(time.Since(tDate).Seconds())
+	tDate, dateErr := time.Parse(time.RFC1123, headers.Get("Date"))
+	ageSeconds, ageErr := strconv.Atoi(headers.Get("Age"))
+	if dateErr != nil {
+		return ageSeconds
 	}
-	age, ageErr := strconv.Atoi(headers.Get("Age"))
-	if ageErr == nil {
-		return age
+	dateSeconds := int(time.Since(tDate).Seconds())
+	if ageErr != nil {
+		return dateSeconds
 	}
-	return 0
+	return max(dateSeconds, ageSeconds)
 }
 
 // Returns Vary response header(s) as string
