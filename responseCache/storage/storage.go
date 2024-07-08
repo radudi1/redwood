@@ -2,6 +2,7 @@ package storage
 
 import (
 	"log"
+	"slices"
 
 	"github.com/redis/rueidis"
 	"github.com/redis/rueidis/rueidiscompat"
@@ -53,7 +54,7 @@ func (storage *Storage) Get(key string, fields ...string) (storageObj *StorageOb
 		if err != ErrNotFound {
 			log.Println(err)
 		}
-	} else if storage.ram != nil { // cache redis hit to ram
+	} else if storage.ram != nil && slices.Contains(fields, "body") { // cache redis hit to ram only if it's a full object
 		storage.ram.Set(key, storageObj)
 	}
 	fromBackend = RedisBackend
