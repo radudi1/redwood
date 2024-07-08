@@ -133,7 +133,6 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 	if !cacheObjFound {
 		return false, stats
 	}
-	cacheObj.Headers.Add("X-Cache", "HIT")
 	return sendResponse(req, cacheObj, cacheObj.StatusCode, w, stats)
 
 }
@@ -146,6 +145,18 @@ func fetchFromCache(req *http.Request, fields ...string) (cacheObj *CacheObject,
 		foundAndValid = false
 		return
 	}
+	// check sanity
+	if cacheObj == nil {
+		log.Println("Nil cache object received for", req.Host+req.RequestURI)
+		foundAndValid = false
+		return
+	}
+	if cacheObj.Headers == nil {
+		log.Println("Nil cache headers received for", req.Host+req.RequestURI)
+		foundAndValid = false
+		return
+	}
+	// check staleness
 	if cacheObj.IsStale() { // object is stale
 		if !config.StandardViolations.EnableStandardViolations || !config.StandardViolations.ServeStale { // serve stale is not enabled - we obey standards
 			if cacheObj.Metadata.RevalidateDeadline.Before(time.Now()) { // we exceeded deadline until we could serve stale and revalidate in background according to standards
@@ -402,6 +413,8 @@ func setWorker(statusCode int, metadata storage.StorageMetadata, req *http.Reque
 		workerId := prioworkers.WorkStart(mainPrio)
 		defer prioworkers.WorkEnd(workerId)
 	}
+	respHeaders.Del("Age")                      // remove age because it will be incorrect when presented to client
+	respHeaders.Add("X-Cache", hostname+":HIT") // if stored response will be presented to client it will always be a hit
 	if err := cache.Set(statusCode, metadata, req, respHeaders, body); err != nil && err != storage.ErrTtlTooSmall && err != storage.ErrTooBig {
 		log.Println("Error setting cache object for ", req.RequestURI)
 		return

@@ -56,7 +56,7 @@ func (cache *Cache) Get(req *http.Request, fields ...string) (cacheObj *CacheObj
 		metadataCacheKey: metadataKey,
 		backends:         fromBackend,
 	}
-	if cacheObj.Metadata.Vary == "" {
+	if len(cacheObj.Metadata.Vary) == 0 {
 		cacheObj.cacheKey = metadataKey
 		return
 	}

@@ -28,12 +28,15 @@ const (
 )
 
 var (
+	hostname          string
 	logChan           chan string
 	revalidateLogChan chan string
 	cache             Cache
 )
 
 func Init() {
+
+	hostname, _ = os.Hostname()
 
 	loadConfig()
 
