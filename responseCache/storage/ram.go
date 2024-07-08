@@ -38,6 +38,11 @@ func (ram *RamStorage) Get(key string, fields ...string) (storageObj *StorageObj
 		ram.counters.misses.Add(1)
 		return nil, ErrNotFound
 	}
+	if obj.Metadata.Expires.Before(time.Now()) {
+		ram.cache.Remove(key)
+		ram.counters.misses.Add(1)
+		return nil, ErrNotFound
+	}
 	ram.counters.hits.Add(1)
 	return obj, nil
 }
