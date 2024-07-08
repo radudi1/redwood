@@ -369,6 +369,10 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 		logStatus = "UC_STALE"
 		return
 	}
+	if metadata.Expires.Unix() < time.Now().Unix()+int64(config.Cache.MinTtl) {
+		logStatus = "UC_LOWTTL"
+		return
+	}
 
 	// fetch response body
 	lr := &io.LimitedReader{
