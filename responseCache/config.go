@@ -84,7 +84,7 @@ func loadConfig() {
 	validateConfInt(&config.Cache.FreshPercentRevalidate, 1, math.MaxInt, 100)
 
 	// computations
-	config.Cache.MinTtl = max(config.Ram.MinTtl, config.Redis.MinTtl)
+	config.Cache.MinTtl = min(config.Ram.MinTtl, config.Redis.MinTtl)
 	config.Cache.MaxBodySize = max(config.Ram.MaxBodySize, config.Redis.MaxBodySize)
 
 }
