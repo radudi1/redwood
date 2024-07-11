@@ -46,6 +46,7 @@ type atomicCounters struct {
 }
 
 type Base struct {
+	StorageBackend
 	config   StorageBackendConfig
 	counters atomicCounters
 }
