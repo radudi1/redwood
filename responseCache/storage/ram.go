@@ -59,12 +59,12 @@ func (ram *RamStorage) Set(key string, storageObj *StorageObject) error {
 	return nil
 }
 
-func (ram *RamStorage) Update(key string, storageObj *StorageObject) error {
+func (ram *RamStorage) Update(key string, metadata *StorageMetadata) error {
 	obj, ok := ram.cache.Peek(key)
 	if !ok {
 		return ErrNotFound
 	}
-	obj.Metadata = storageObj.Metadata
+	obj.Metadata = *metadata
 	return nil
 }
 

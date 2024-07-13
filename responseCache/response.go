@@ -231,7 +231,7 @@ func sendResponse(req *http.Request, cacheObj *CacheObject, toClientStatusCode i
 				log.Println("Could not reeencode cached response: ", reEncodeErr)
 				return false, stats
 			}
-			cacheObj.Body = encodedBuf.String()
+			cacheObj.Body = encodedBuf.Bytes()
 			if encoding == "" {
 				cacheObj.Headers.Del("Content-Encoding")
 			} else {
@@ -245,7 +245,7 @@ func sendResponse(req *http.Request, cacheObj *CacheObject, toClientStatusCode i
 	w.WriteHeader(toClientStatusCode)
 
 	// send response body
-	n, writeErr := io.WriteString(w, cacheObj.Body)
+	n, writeErr := w.Write(cacheObj.Body)
 	if writeErr != nil {
 		counters.WriteErr.Add(1)
 		log.Println(writeErr)
@@ -285,7 +285,7 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 	stats.setSw = stopwatch.Start()
 	defer stats.setSw.Stop()
 
-	var body strings.Builder
+	var body bytes.Buffer
 	var err error
 
 	// create metadata
@@ -406,13 +406,13 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 
 	// send to cache
 	metadata.Vary = varyHeadersAsStr(resp.Header)
-	go setWorker(resp.StatusCode, metadata, req.Clone(context.Background()), resp.Header.Clone(), body.String())
+	go setWorker(resp.StatusCode, metadata, req.Clone(context.Background()), resp.Header.Clone(), body.Bytes())
 
 	logStatus = "MISS"
 
 }
 
-func setWorker(statusCode int, metadata storage.StorageMetadata, req *http.Request, respHeaders http.Header, body string) {
+func setWorker(statusCode int, metadata storage.StorageMetadata, req *http.Request, respHeaders http.Header, body []byte) {
 	if config.Workers.PrioritiesEnabled {
 		workerId := prioworkers.WorkStart(mainPrio)
 		defer prioworkers.WorkEnd(workerId)
