@@ -3,32 +3,11 @@ package storage
 import (
 	"errors"
 	"log"
-	"net/http"
 	"sync/atomic"
 	"time"
 
 	"github.com/vmihailenco/msgpack/v5"
 )
-
-type StorageMetadata struct {
-	// when it was last Updated
-	Updated time.Time
-	// when it becomes Stale
-	Stale time.Time
-	// until when we can serve stale while revalidating in background according to standards
-	RevalidateDeadline time.Time
-	// when it Expires and it will be automatically removed from cache
-	Expires time.Time
-	// all response Vary headers combined into one string
-	Vary string
-}
-
-type StorageObject struct {
-	StatusCode int
-	Metadata   StorageMetadata
-	Headers    http.Header
-	Body       string
-}
 
 type Counters struct {
 	SerErr   uint64
@@ -97,18 +76,18 @@ func (metadata *StorageMetadata) IsStale() bool {
 	return metadata.Stale.Before(time.Now())
 }
 
-func Serialize(data interface{}) (string, error) {
+func Serialize(data interface{}) ([]byte, error) {
 	serData, serErr := msgpack.Marshal(data)
 	if serErr != nil {
 
 		log.Println(serErr)
-		return "", serErr
+		return nil, serErr
 	}
-	return string(serData), nil
+	return serData, nil
 }
 
-func Unserialize(serializedData string, dstData interface{}) error {
-	serErr := msgpack.Unmarshal([]byte(serializedData), dstData)
+func Unserialize(serializedData []byte, dstData interface{}) error {
+	serErr := msgpack.Unmarshal(serializedData, dstData)
 	if serErr != nil {
 		log.Println(serErr)
 		return serErr

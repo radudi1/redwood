@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"errors"
+	"log"
 	"strconv"
 
 	"github.com/redis/rueidis"
@@ -19,6 +21,8 @@ type RedisStorage struct {
 	wrapper *wrappers.RedisWrapper
 }
 
+var ErrChunkSizeMismatch = errors.New("chunk size does not match metadata chunk size")
+
 func NewRedisStorage(config RedisStorageConfig) (*RedisStorage, error) {
 	r := RedisStorage{
 		config: config,
@@ -31,7 +35,7 @@ func NewRedisStorage(config RedisStorageConfig) (*RedisStorage, error) {
 
 func (redis *RedisStorage) Get(key string, fields ...string) (storageObj *StorageObject, err error) {
 
-	var serFields map[string]string
+	var serFields map[string][]byte
 	var redisErr error
 
 	serFields, redisErr = redis.wrapper.Hmget(key, fields...)
@@ -56,7 +60,7 @@ func (redis *RedisStorage) Get(key string, fields ...string) (storageObj *Storag
 
 	if len(serFields["statusCode"]) > 0 {
 		var statusCode int64
-		statusCode, err = strconv.ParseInt(serFields["statusCode"], 10, 64)
+		statusCode, err = strconv.ParseInt(string(serFields["statusCode"]), 10, 64)
 		if err != nil {
 			return
 		}
@@ -70,7 +74,32 @@ func (redis *RedisStorage) Get(key string, fields ...string) (storageObj *Storag
 		}
 	}
 
-	storageObj.Body = serFields["body"]
+	if len(serFields["body"]) > 0 {
+		if storageObj.Metadata.BodyChunkCnt > 0 {
+			storageObj.Body = make([]byte, storageObj.Metadata.BodyChunkCnt*storageObj.Metadata.BodyChunkLen)
+			if copy(storageObj.Body, []byte(serFields["body"])) != storageObj.Metadata.BodyChunkCnt {
+				err = ErrChunkSizeMismatch
+				redis.counters.serErr.Add(1)
+				return
+			}
+			for i := 1; i < storageObj.Metadata.BodyChunkCnt; i++ {
+				chunkName := GetBodyChunkName(i)
+				serFields, err = redis.wrapper.Hmget(key, chunkName)
+				if err != nil {
+					redis.counters.cacheErr.Add(1)
+					return
+				}
+				bodyStart := i * storageObj.Metadata.BodyChunkLen
+				if copy(storageObj.Body[bodyStart:], []byte(serFields[chunkName])) != storageObj.Metadata.BodyChunkLen {
+					err = ErrChunkSizeMismatch
+					redis.counters.serErr.Add(1)
+					return
+				}
+			}
+		} else { // old behaviour
+			storageObj.Body = []byte(serFields["body"])
+		}
+	}
 
 	redis.counters.hits.Add(1)
 	return
@@ -88,7 +117,7 @@ func (redis *RedisStorage) Set(key string, storageObj *StorageObject) error {
 		return serErr
 	}
 
-	query := redis.wrapper.GetConn().B().Hset().Key(key).FieldValue().FieldValue("metadata", metadataSer)
+	query := redis.wrapper.GetConn().B().Hset().Key(key).FieldValue().FieldValue("metadata", string(metadataSer))
 
 	if storageObj.Headers != nil {
 		headersSer, serErr := Serialize(storageObj.Headers)
@@ -96,11 +125,7 @@ func (redis *RedisStorage) Set(key string, storageObj *StorageObject) error {
 			redis.counters.serErr.Add(1)
 			return serErr
 		}
-		query = query.FieldValue("statusCode", strconv.Itoa(storageObj.StatusCode)).FieldValue("headers", headersSer)
-	}
-
-	if len(storageObj.Body) > 0 {
-		query = query.FieldValue("body", storageObj.Body)
+		query = query.FieldValue("statusCode", strconv.Itoa(storageObj.StatusCode)).FieldValue("headers", string(headersSer))
 	}
 
 	redisErr := redis.wrapper.GetConn().Do(redis.wrapper.Context, query.Build()).Error()
@@ -112,11 +137,31 @@ func (redis *RedisStorage) Set(key string, storageObj *StorageObject) error {
 		redis.counters.cacheErr.Add(1)
 		return redisErr
 	}
+
+	if len(storageObj.Body) > 0 {
+		numChunks := len(storageObj.Body)/BodyChunkLen + 1
+		for i := 0; i < numChunks; i++ {
+			chunkName := GetBodyChunkName(i)
+			chunkStart := i * BodyChunkLen
+			chunkEnd := min(chunkStart+BodyChunkLen-1, len(storageObj.Body))
+			query = redis.wrapper.GetConn().B().Hset().Key(key).FieldValue().FieldValue(chunkName, string(storageObj.Body[chunkStart:chunkEnd]))
+			redisErr := redis.wrapper.GetConn().Do(redis.wrapper.Context, query.Build()).Error()
+			if redisErr != nil {
+				redis.counters.cacheErr.Add(1)
+				// if we can't write the entire body try to delete the entire key so that we don't have partial (incorrect) objects in cache
+				if delErr := redis.Del(key); delErr != nil {
+					log.Println("WARNING! Could not delete incomplete redis cache key. You will have INCORRECT responses from redis cache")
+				}
+				return redisErr
+			}
+		}
+	}
+
 	return nil
 }
 
-func (redis *RedisStorage) Update(key string, storageObj *StorageObject) error {
-	metadataSer, serErr := Serialize(storageObj.Metadata)
+func (redis *RedisStorage) Update(key string, metadata *StorageMetadata) error {
+	metadataSer, serErr := Serialize(metadata)
 	if serErr != nil {
 		redis.counters.serErr.Add(1)
 		return serErr
@@ -127,14 +172,14 @@ func (redis *RedisStorage) Update(key string, storageObj *StorageObject) error {
 		redis.wrapper.GetConn().B().Hset().
 			Key(key).
 			FieldValue().
-			FieldValue("metadata", metadataSer).
+			FieldValue("metadata", string(metadataSer)).
 			Build()).
 		Error()
 	if redisErr != nil {
 		redis.counters.cacheErr.Add(1)
 		return redisErr
 	}
-	if redisErr = redis.expire(key, &storageObj.Metadata); redisErr != nil {
+	if redisErr = redis.expire(key, metadata); redisErr != nil {
 		redis.counters.cacheErr.Add(1)
 		return redisErr
 	}
@@ -153,6 +198,15 @@ func (redis *RedisStorage) Has(key string) bool {
 		return false
 	}
 	return exists
+}
+
+func (redis *RedisStorage) Del(key string) error {
+	query := redis.wrapper.GetConn().B().Del().Key(key)
+	err := redis.wrapper.GetConn().Do(redis.wrapper.Context, query.Build()).Error()
+	if err != nil {
+		redis.counters.cacheErr.Add(1)
+	}
+	return err
 }
 
 // Sets redis ttl for key according to metadata
