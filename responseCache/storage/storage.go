@@ -202,6 +202,13 @@ func GetBodyChunkName(chunkNo int) string {
 	return "body" + strconv.Itoa(chunkNo)
 }
 
+func GetBodyChunkCnt(backendObj *BackendObject) int {
+	if backendObj.Metadata.BodySize%backendObj.Metadata.BodyChunkLen == 0 {
+		return backendObj.Metadata.BodySize / backendObj.Metadata.BodyChunkLen
+	}
+	return backendObj.Metadata.BodySize/backendObj.Metadata.BodyChunkLen + 1
+}
+
 func (backendObj *BackendObject) Write(p []byte) (n int, err error) {
 	n = copy(backendObj.Body[backendObj.writerPos:], p)
 	backendObj.writerPos += n
