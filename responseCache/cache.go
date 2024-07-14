@@ -1,6 +1,7 @@
 package responseCache
 
 import (
+	"io"
 	"net/http"
 	"slices"
 	"strconv"
@@ -12,9 +13,7 @@ import (
 
 type CacheObject struct {
 	storage.StorageObject
-	cacheKey         string
-	metadataCacheKey string
-	backends         int
+	MetadataCacheKey string
 }
 
 type Cache struct {
@@ -41,11 +40,10 @@ func (cache *Cache) Get(req *http.Request, fields ...string) (cacheObj *CacheObj
 		fields = append(fields, "metadata")
 	}
 	var storageObj *storage.StorageObject
-	var fromBackend int
 
 	// fetch initial object - could be real object or metadata-only
 	metadataKey := getCacheKey(req, "")
-	storageObj, fromBackend, err = cache.storage.Get(metadataKey, fields...)
+	storageObj, err = cache.storage.Get(metadataKey, fields...)
 	if err != nil {
 		return
 	}
@@ -53,39 +51,38 @@ func (cache *Cache) Get(req *http.Request, fields ...string) (cacheObj *CacheObj
 	// if it's the real object return it
 	cacheObj = &CacheObject{
 		StorageObject:    *storageObj,
-		metadataCacheKey: metadataKey,
-		backends:         fromBackend,
+		MetadataCacheKey: metadataKey,
 	}
 	if len(cacheObj.Metadata.Vary) == 0 {
-		cacheObj.cacheKey = metadataKey
 		return
 	}
 
 	// if it's not the real object get the real object and return it
 	cacheKey := getCacheKey(req, varyVals(cacheObj.Metadata.Vary, req.Header))
-	storageObj, fromBackend, err = cache.storage.Get(cacheKey, fields...)
+	storageObj, err = cache.storage.Get(cacheKey, fields...)
 	if err != nil {
 		return
 	}
 	cacheObj.StorageObject = *storageObj
-	cacheObj.cacheKey = cacheKey
-	cacheObj.backends = fromBackend
 
 	return
+}
+
+func (cache *Cache) WriteBodyToClient(cacheObj *CacheObject, w io.Writer) error {
+	return cache.storage.WriteBodyToClient(&cacheObj.StorageObject, w)
 }
 
 func (cache *Cache) Set(statusCode int, metadata storage.StorageMetadata, req *http.Request, respHeaders http.Header, body []byte) error {
 
 	// init
-	storageObj := &storage.StorageObject{
-		Metadata: metadata,
-	}
+	storageObj := &storage.StorageObject{}
+	storageObj.Metadata = metadata
 
 	// if it has vary headers we need to store metadata-only object
 	// we assume that requests that vary have the same caching directives for all variations
 	if len(metadata.Vary) > 0 {
-		cacheKey := getCacheKey(req, "")
-		err := cache.storage.Set(cacheKey, storageObj)
+		storageObj.CacheKey = getCacheKey(req, "")
+		err := cache.storage.Set(storageObj)
 		if err != nil {
 			return err
 		}
@@ -95,8 +92,8 @@ func (cache *Cache) Set(statusCode int, metadata storage.StorageMetadata, req *h
 	storageObj.StatusCode = statusCode
 	storageObj.Headers = respHeaders
 	storageObj.Body = body
-	cacheKey := getCacheKey(req, varyVals(metadata.Vary, req.Header))
-	err := cache.storage.Set(cacheKey, storageObj)
+	storageObj.CacheKey = getCacheKey(req, varyVals(metadata.Vary, req.Header))
+	err := cache.storage.Set(storageObj)
 	return err
 
 }

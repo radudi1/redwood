@@ -1,26 +1,27 @@
 package storage
 
 import (
+	"io"
 	"sync/atomic"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 )
 
-type RamStorageConfig struct {
+type RamBackendConfig struct {
 	StorageBackendConfig
 	NumItems int
 }
 
 type RamStorage struct {
 	Base
-	config         RamStorageConfig
-	cache          *lru.TwoQueueCache[string, *StorageObject]
+	config         RamBackendConfig
+	cache          *lru.TwoQueueCache[string, *BackendObject]
 	numSetsSinceGC atomic.Int64
 }
 
-func NewRamStorage(config RamStorageConfig) (*RamStorage, error) {
-	cache, err := lru.New2Q[string, *StorageObject](config.NumItems)
+func NewRamStorage(config RamBackendConfig) (*RamStorage, error) {
+	cache, err := lru.New2Q[string, *BackendObject](config.NumItems)
 	if err != nil {
 		return nil, err
 	}
@@ -32,7 +33,7 @@ func NewRamStorage(config RamStorageConfig) (*RamStorage, error) {
 	return ram, nil
 }
 
-func (ram *RamStorage) Get(key string, fields ...string) (storageObj *StorageObject, err error) {
+func (ram *RamStorage) Get(key string, fields ...string) (backendObj *BackendObject, err error) {
 	obj, ok := ram.cache.Get(key)
 	if !ok {
 		ram.counters.misses.Add(1)
@@ -47,11 +48,22 @@ func (ram *RamStorage) Get(key string, fields ...string) (storageObj *StorageObj
 	return obj, nil
 }
 
-func (ram *RamStorage) Set(key string, storageObj *StorageObject) error {
-	if err := ram.IsCacheable(storageObj); err != nil {
+func (ram *RamStorage) WriteBodyToClient(storageObj *StorageObject, w io.Writer) error {
+	if storageObj == nil {
+		return ErrNotFound
+	}
+	if len(storageObj.Body) == 0 {
+		return nil
+	}
+	_, err := w.Write(storageObj.Body)
+	return err
+}
+
+func (ram *RamStorage) Set(key string, backendObj *BackendObject) error {
+	if err := ram.IsCacheable(backendObj); err != nil {
 		return err
 	}
-	ram.cache.Add(key, storageObj)
+	ram.cache.Add(key, backendObj)
 	ram.numSetsSinceGC.Add(1)
 	if ram.numSetsSinceGC.Load() > int64(ram.config.NumItems)*2 {
 		go ram.GCWorker()

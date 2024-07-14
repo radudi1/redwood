@@ -2,6 +2,7 @@ package storage
 
 import (
 	"errors"
+	"io"
 	"log"
 	"strconv"
 
@@ -10,20 +11,20 @@ import (
 	"github.com/andybalholm/redwood/responseCache/storage/wrappers"
 )
 
-type RedisStorageConfig struct {
+type RedisBackendConfig struct {
 	StorageBackendConfig
 	wrappers.RedisConfig
 }
 
 type RedisStorage struct {
 	Base
-	config  RedisStorageConfig
+	config  RedisBackendConfig
 	wrapper *wrappers.RedisWrapper
 }
 
 var ErrChunkSizeMismatch = errors.New("chunk size does not match metadata chunk size")
 
-func NewRedisStorage(config RedisStorageConfig) (*RedisStorage, error) {
+func NewRedisStorage(config RedisBackendConfig) (*RedisStorage, error) {
 	r := RedisStorage{
 		config: config,
 	}
@@ -33,7 +34,7 @@ func NewRedisStorage(config RedisStorageConfig) (*RedisStorage, error) {
 	return &r, err
 }
 
-func (redis *RedisStorage) Get(key string, fields ...string) (storageObj *StorageObject, err error) {
+func (redis *RedisStorage) Get(key string, fields ...string) (backendObj *BackendObject, err error) {
 
 	var serFields map[string][]byte
 	var redisErr error
@@ -51,9 +52,9 @@ func (redis *RedisStorage) Get(key string, fields ...string) (storageObj *Storag
 		return nil, ErrNotFound
 	}
 
-	storageObj = &StorageObject{}
+	backendObj = &BackendObject{}
 
-	if err = Unserialize(serFields["metadata"], &storageObj.Metadata); err != nil {
+	if err = Unserialize(serFields["metadata"], &backendObj.Metadata); err != nil {
 		redis.counters.serErr.Add(1)
 		return
 	}
@@ -64,40 +65,34 @@ func (redis *RedisStorage) Get(key string, fields ...string) (storageObj *Storag
 		if err != nil {
 			return
 		}
-		storageObj.StatusCode = int(statusCode)
+		backendObj.StatusCode = int(statusCode)
 	}
 
 	if len(serFields["headers"]) > 0 {
-		if err = Unserialize(serFields["headers"], &storageObj.Headers); err != nil {
+		if err = Unserialize(serFields["headers"], &backendObj.Headers); err != nil {
 			redis.counters.serErr.Add(1)
 			return
 		}
 	}
 
 	if len(serFields["body"]) > 0 {
-		if storageObj.Metadata.BodyChunkCnt > 0 {
-			storageObj.Body = make([]byte, storageObj.Metadata.BodyChunkCnt*storageObj.Metadata.BodyChunkLen)
-			if copy(storageObj.Body, []byte(serFields["body"])) != storageObj.Metadata.BodyChunkCnt {
-				err = ErrChunkSizeMismatch
-				redis.counters.serErr.Add(1)
-				return
-			}
-			for i := 1; i < storageObj.Metadata.BodyChunkCnt; i++ {
+		if backendObj.Metadata.BodyChunkLen > 0 {
+			chunkCnt := backendObj.Metadata.BodySize/backendObj.Metadata.BodyChunkLen + 1
+			backendObj.Body = make([]byte, chunkCnt*backendObj.Metadata.BodyChunkLen)
+			writtenBytes := copy(backendObj.Body, serFields["body"])
+			for i := 1; i < chunkCnt; i++ {
 				chunkName := GetBodyChunkName(i)
 				serFields, err = redis.wrapper.Hmget(key, chunkName)
 				if err != nil {
 					redis.counters.cacheErr.Add(1)
 					return
 				}
-				bodyStart := i * storageObj.Metadata.BodyChunkLen
-				if copy(storageObj.Body[bodyStart:], []byte(serFields[chunkName])) != storageObj.Metadata.BodyChunkLen {
-					err = ErrChunkSizeMismatch
-					redis.counters.serErr.Add(1)
-					return
-				}
+				bodyStart := i * backendObj.Metadata.BodyChunkLen
+				writtenBytes += copy(backendObj.Body[bodyStart:], serFields[chunkName])
 			}
+			backendObj.Body = backendObj.Body[:writtenBytes]
 		} else { // old behaviour
-			storageObj.Body = []byte(serFields["body"])
+			backendObj.Body = serFields["body"]
 		}
 	}
 
@@ -105,13 +100,38 @@ func (redis *RedisStorage) Get(key string, fields ...string) (storageObj *Storag
 	return
 }
 
-func (redis *RedisStorage) Set(key string, storageObj *StorageObject) error {
+func (redis *RedisStorage) WriteBodyToClient(storageObj *StorageObject, w io.Writer) error {
+	if storageObj.Metadata.BodyChunkLen > 0 && storageObj.Metadata.BodySize == 0 { // BodyChunkLen check is for compatibility with older cache versions which don't have this field
+		return nil
+	}
+	chunkCnt := storageObj.Metadata.BodySize/storageObj.Metadata.BodyChunkLen + 1
+	for i := 0; i < chunkCnt; i++ {
+		query := redis.wrapper.GetConn().B().Hget().Key(storageObj.CacheKey).Field(GetBodyChunkName(i)).Build()
+		bodyBytes, err := redis.wrapper.GetConn().Do(redis.wrapper.Context, query).AsBytes()
+		if err != nil {
+			redis.counters.cacheErr.Add(1)
+			return err
+		}
+		if len(bodyBytes) < 1 {
+			redis.counters.cacheErr.Add(1)
+			return ErrNotFound
+		}
+		_, err = w.Write(bodyBytes)
+		if err != nil {
+			redis.counters.cacheErr.Add(1)
+			return err
+		}
+	}
+	return nil
+}
 
-	if err := redis.IsCacheable(storageObj); err != nil {
+func (redis *RedisStorage) Set(key string, backendObj *BackendObject) error {
+
+	if err := redis.IsCacheable(backendObj); err != nil {
 		return err
 	}
 
-	metadataSer, serErr := Serialize(storageObj.Metadata)
+	metadataSer, serErr := Serialize(backendObj.Metadata)
 	if serErr != nil {
 		redis.counters.serErr.Add(1)
 		return serErr
@@ -119,13 +139,13 @@ func (redis *RedisStorage) Set(key string, storageObj *StorageObject) error {
 
 	query := redis.wrapper.GetConn().B().Hset().Key(key).FieldValue().FieldValue("metadata", string(metadataSer))
 
-	if storageObj.Headers != nil {
-		headersSer, serErr := Serialize(storageObj.Headers)
+	if backendObj.Headers != nil {
+		headersSer, serErr := Serialize(backendObj.Headers)
 		if serErr != nil {
 			redis.counters.serErr.Add(1)
 			return serErr
 		}
-		query = query.FieldValue("statusCode", strconv.Itoa(storageObj.StatusCode)).FieldValue("headers", string(headersSer))
+		query = query.FieldValue("statusCode", strconv.Itoa(backendObj.StatusCode)).FieldValue("headers", string(headersSer))
 	}
 
 	redisErr := redis.wrapper.GetConn().Do(redis.wrapper.Context, query.Build()).Error()
@@ -133,18 +153,18 @@ func (redis *RedisStorage) Set(key string, storageObj *StorageObject) error {
 		redis.counters.cacheErr.Add(1)
 		return redisErr
 	}
-	if redisErr = redis.expire(key, &storageObj.Metadata); redisErr != nil {
+	if redisErr = redis.expire(key, &backendObj.Metadata); redisErr != nil {
 		redis.counters.cacheErr.Add(1)
 		return redisErr
 	}
 
-	if len(storageObj.Body) > 0 {
-		numChunks := len(storageObj.Body)/BodyChunkLen + 1
-		for i := 0; i < numChunks; i++ {
+	if len(backendObj.Body) > 0 {
+		chunkCnt := backendObj.Metadata.BodySize/backendObj.Metadata.BodyChunkLen + 1
+		for i := 0; i < chunkCnt; i++ {
 			chunkName := GetBodyChunkName(i)
-			chunkStart := i * BodyChunkLen
-			chunkEnd := min(chunkStart+BodyChunkLen-1, len(storageObj.Body))
-			query = redis.wrapper.GetConn().B().Hset().Key(key).FieldValue().FieldValue(chunkName, string(storageObj.Body[chunkStart:chunkEnd]))
+			chunkStart := i * backendObj.Metadata.BodyChunkLen
+			chunkEnd := min(chunkStart+backendObj.Metadata.BodyChunkLen, len(backendObj.Body))
+			query = redis.wrapper.GetConn().B().Hset().Key(key).FieldValue().FieldValue(chunkName, string(backendObj.Body[chunkStart:chunkEnd]))
 			redisErr := redis.wrapper.GetConn().Do(redis.wrapper.Context, query.Build()).Error()
 			if redisErr != nil {
 				redis.counters.cacheErr.Add(1)

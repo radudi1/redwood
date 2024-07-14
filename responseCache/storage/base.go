@@ -31,16 +31,17 @@ type Base struct {
 }
 
 var (
-	ErrNotFound    = errors.New("storage object not found")
-	ErrTooBig      = errors.New("storage object too big")
-	ErrTtlTooSmall = errors.New("ttl is smaller than minimum backend storage ttl")
+	ErrNotFound       = errors.New("storage object not found")
+	ErrTooBig         = errors.New("storage object too big")
+	ErrTtlTooSmall    = errors.New("ttl is smaller than minimum backend storage ttl")
+	ErrInvalidBackend = errors.New("invalid backend")
 )
 
-func (base *Base) IsCacheable(storageObj *StorageObject) error {
+func (base *Base) IsCacheable(storageObj *BackendObject) error {
 	if base.config.MinTtl > 0 && storageObj.Metadata.Expires.Unix()-time.Now().Unix() < int64(base.config.MinTtl) {
 		return ErrTtlTooSmall
 	}
-	if len(storageObj.Body) > base.config.MaxBodySize {
+	if storageObj.Metadata.BodySize > base.config.MaxBodySize || len(storageObj.Body) > base.config.MaxBodySize {
 		return ErrTooBig
 	}
 	return nil

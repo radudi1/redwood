@@ -29,7 +29,7 @@ func GetFakeCert(serverCert *x509.Certificate, privateKey crypto.PrivateKey) *tl
 	if !config.Cache.Enabled { // respCache is actually disabled
 		return nil
 	}
-	cacheObj, _, err := cache.storage.Get(GetCertKey(serverCert), "metadata", "body")
+	cacheObj, err := cache.storage.Get(GetCertKey(serverCert), "metadata", "body")
 	if err != nil {
 		if err != storage.ErrNotFound {
 			log.Println(err)
@@ -50,7 +50,7 @@ func GetDomainFakeCert(domain string, privateKey crypto.PrivateKey) *tls.Certifi
 	if !config.Cache.Enabled { // respCache is actually disabled
 		return nil
 	}
-	cacheObj, _, err := cache.storage.Get(GetDomainCertKey(domain), "metadata", "body")
+	cacheObj, err := cache.storage.Get(GetDomainCertKey(domain), "metadata", "body")
 	if err != nil {
 		if err != storage.ErrNotFound {
 			log.Println(err)
@@ -84,8 +84,11 @@ func SetCertAsValid(serverCert *x509.Certificate, fakeCert *tls.Certificate) {
 	}
 	metadata.Stale = metadata.Expires
 	metadata.RevalidateDeadline = metadata.Stale
-	storageObj := storage.StorageObject{
-		Metadata: metadata,
+	storageObj := &storage.StorageObject{
+		CacheKey: GetCertKey(serverCert),
+		BackendObject: storage.BackendObject{
+			Metadata: metadata,
+		},
 	}
 	var err error
 	storageObj.Body, err = storage.Serialize(fakeCert.Certificate)
@@ -93,7 +96,7 @@ func SetCertAsValid(serverCert *x509.Certificate, fakeCert *tls.Certificate) {
 		log.Println(err)
 		return
 	}
-	err = cache.storage.Set(GetCertKey(serverCert), &storageObj)
+	err = cache.storage.Set(storageObj)
 	if err != nil {
 		log.Println(err)
 		return
@@ -117,8 +120,11 @@ func SetDomainCert(serverCert *x509.Certificate, fakeCert *tls.Certificate) {
 	}
 	metadata.Stale = metadata.Expires
 	metadata.RevalidateDeadline = metadata.Stale
-	storageObj := storage.StorageObject{
-		Metadata: metadata,
+	storageObj := &storage.StorageObject{
+		CacheKey: GetDomainCertKey(serverCert.Subject.CommonName),
+		BackendObject: storage.BackendObject{
+			Metadata: metadata,
+		},
 	}
 	var err error
 	storageObj.Body, err = storage.Serialize(fakeCert.Certificate)
@@ -126,7 +132,7 @@ func SetDomainCert(serverCert *x509.Certificate, fakeCert *tls.Certificate) {
 		log.Println(err)
 		return
 	}
-	err = cache.storage.Set(GetDomainCertKey(serverCert.Subject.CommonName), &storageObj)
+	err = cache.storage.Set(storageObj)
 	if err != nil {
 		log.Println(err)
 		return

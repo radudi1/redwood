@@ -129,7 +129,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 	}
 
 	// if we get here we need to fetch full object from cache
-	cacheObj, cacheObjFound := fetchFromCache(req)
+	cacheObj, cacheObjFound := fetchFromCache(req, "statusCode", "metadata", "headers")
 	if !cacheObjFound {
 		return false, stats
 	}
@@ -187,14 +187,14 @@ func sendResponse(req *http.Request, cacheObj *CacheObject, toClientStatusCode i
 
 	// set log status (will be modified if necessary) and hit source
 	hitSrc := "_REDIS"
-	if (cacheObj.backends & storage.RamBackend) != 0 {
+	if (cacheObj.Backends & storage.RamBackend) != 0 {
 		hitSrc = "_RAM"
 	}
 	logStatus := "HIT"
 
 	// log on exit
 	defer func() {
-		cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, logStatus+hitSrc, cacheObj.cacheKey, stats)
+		cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, logStatus+hitSrc, cacheObj.CacheKey, stats)
 	}()
 
 	// if not modified there's nothing there to send except status code
@@ -245,15 +245,11 @@ func sendResponse(req *http.Request, cacheObj *CacheObject, toClientStatusCode i
 	w.WriteHeader(toClientStatusCode)
 
 	// send response body
-	n, writeErr := w.Write(cacheObj.Body)
+	writeErr := cache.WriteBodyToClient(cacheObj, w)
 	if writeErr != nil {
 		counters.WriteErr.Add(1)
 		log.Println(writeErr)
 		return true, stats
-	}
-	if n != len(cacheObj.Body) {
-		counters.WriteErr.Add(1)
-		log.Println("Written ", n, " bytes to client instead of ", len(cacheObj.Body), "!!!")
 	}
 
 	return true, stats
