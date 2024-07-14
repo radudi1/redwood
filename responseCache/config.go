@@ -54,8 +54,8 @@ type StandardViolationsConfig struct {
 }
 
 type Config struct {
-	Redis              *storage.RedisStorageConfig
-	Ram                *storage.RamStorageConfig
+	Redis              *storage.RedisBackendConfig
+	Ram                *storage.RamBackendConfig
 	Cache              *CacheConfig
 	Log                *LogConfig
 	Workers            *WorkersConfig

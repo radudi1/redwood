@@ -48,13 +48,17 @@ func NewRedisWrapper(config RedisConfig) (*RedisWrapper, error) {
 }
 
 func (wrapper *RedisWrapper) Hmget(key string, fields ...string) (map[string][]byte, error) {
-	redisArr, redisErr := wrapper.conn.Do(wrapper.Context, wrapper.conn.B().Hmget().Key(key).Field(fields...).Build()).AsStrSlice()
+	redisArr, redisErr := wrapper.conn.Do(wrapper.Context, wrapper.conn.B().Hmget().Key(key).Field(fields...).Build()).ToArray()
 	if redisErr != nil {
 		return nil, redisErr
 	}
 	m := make(map[string][]byte, len(fields))
 	for i, k := range fields {
-		m[k] = []byte(redisArr[i])
+		b, err := redisArr[i].AsBytes()
+		if err != nil {
+			return nil, err
+		}
+		m[k] = b
 	}
 	return m, nil
 }
