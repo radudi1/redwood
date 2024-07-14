@@ -15,14 +15,14 @@ require (
 	github.com/miekg/dns v1.1.59
 	github.com/open-ch/ja3 v1.0.1
 	github.com/qri-io/starlib v0.5.0
-	github.com/redis/rueidis v1.0.38
-	github.com/redis/rueidis/rueidiscompat v1.0.38
+	github.com/redis/rueidis v1.0.41
+	github.com/redis/rueidis/rueidiscompat v1.0.41
 	github.com/remogatto/ftpget v0.0.0-20120222025949-5c3c8286a3b0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zeebo/xxh3 v1.0.2
 	go.starlark.net v0.0.0-20240411212711-9b43f0afd521
 	golang.org/x/crypto v0.24.0
-	golang.org/x/image v0.15.0
+	golang.org/x/image v0.18.0
 	golang.org/x/net v0.26.0
 	golang.org/x/text v0.16.0
 	gopkg.in/yaml.v3 v3.0.1
