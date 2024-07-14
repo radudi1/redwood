@@ -245,11 +245,13 @@ func sendResponse(req *http.Request, cacheObj *CacheObject, toClientStatusCode i
 	w.WriteHeader(toClientStatusCode)
 
 	// send response body
-	writeErr := cache.WriteBodyToClient(cacheObj, w)
-	if writeErr != nil {
-		counters.WriteErr.Add(1)
-		log.Println(writeErr)
-		return true, stats
+	if cacheObj.Metadata.BodySize > 0 {
+		writeErr := cache.WriteBodyToClient(cacheObj, w)
+		if writeErr != nil {
+			counters.WriteErr.Add(1)
+			log.Println(writeErr)
+			return true, stats
+		}
 	}
 
 	return true, stats
