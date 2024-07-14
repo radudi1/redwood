@@ -41,9 +41,11 @@ func (redis *RedisStorage) Get(key string, fields ...string) (backendObj *Backen
 
 	serFields, redisErr = redis.wrapper.Hmget(key, fields...)
 	if redisErr != nil {
-		if redisErr != rueidis.Nil {
-			redis.counters.cacheErr.Add(1)
+		if redisErr == rueidis.Nil {
+			err = ErrNotFound
+			return
 		}
+		redis.counters.cacheErr.Add(1)
 		err = redisErr
 		return
 	}
@@ -77,7 +79,7 @@ func (redis *RedisStorage) Get(key string, fields ...string) (backendObj *Backen
 
 	if len(serFields["body"]) > 0 {
 		if backendObj.Metadata.BodyChunkLen > 0 {
-			chunkCnt := backendObj.Metadata.BodySize/backendObj.Metadata.BodyChunkLen + 1
+			chunkCnt := GetBodyChunkCnt(backendObj)
 			backendObj.Body = make([]byte, chunkCnt*backendObj.Metadata.BodyChunkLen)
 			writtenBytes := copy(backendObj.Body, serFields["body"])
 			for i := 1; i < chunkCnt; i++ {
@@ -101,10 +103,10 @@ func (redis *RedisStorage) Get(key string, fields ...string) (backendObj *Backen
 }
 
 func (redis *RedisStorage) WriteBodyToClient(storageObj *StorageObject, w io.Writer) error {
-	if storageObj.Metadata.BodyChunkLen > 0 && storageObj.Metadata.BodySize == 0 { // BodyChunkLen check is for compatibility with older cache versions which don't have this field
+	if storageObj.Metadata.BodySize == 0 {
 		return nil
 	}
-	chunkCnt := storageObj.Metadata.BodySize/storageObj.Metadata.BodyChunkLen + 1
+	chunkCnt := GetBodyChunkCnt(&storageObj.BackendObject)
 	for i := 0; i < chunkCnt; i++ {
 		query := redis.wrapper.GetConn().B().Hget().Key(storageObj.CacheKey).Field(GetBodyChunkName(i)).Build()
 		bodyBytes, err := redis.wrapper.GetConn().Do(redis.wrapper.Context, query).AsBytes()
