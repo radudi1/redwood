@@ -165,10 +165,10 @@ func fetchFromCache(req *http.Request, fields ...string) (cacheObj *CacheObject,
 			}
 			// object is stale but it's within revalidation deadline
 			sentToRevalidation = true
-			go revalidateWorker(req.Clone(context.Background()), cacheObj.Headers.Clone())
+			go revalidateWorker(req.Clone(context.Background()), cacheObj)
 		} else { // serve stale is enabled - we serve and revalidate
 			sentToRevalidation = true
-			go revalidateWorker(req.Clone(context.Background()), cacheObj.Headers.Clone())
+			go revalidateWorker(req.Clone(context.Background()), cacheObj)
 		}
 	}
 	// if we get here we can serve the object and we also update ttl
@@ -453,7 +453,7 @@ func updateTtlWorker(cachedMetadata storage.StorageMetadata, req http.Request, r
 	counters.Updates.Add(1)
 }
 
-func revalidateWorker(req *http.Request, respHeaders http.Header) {
+func revalidateWorker(req *http.Request, cacheObj *CacheObject) {
 
 	if config.Workers.PrioritiesEnabled {
 		workerId := prioworkers.WorkStart(revalidateWPrio)
@@ -461,7 +461,7 @@ func revalidateWorker(req *http.Request, respHeaders http.Header) {
 	}
 
 	// if this is request is currently revalidating (by another goroutine) we skip it
-	cacheKey := getCacheKey(req, respHeaders.Get("Vary"))
+	cacheKey := getCacheKey(req, cacheObj.Headers.Get("Vary"))
 	revalidateReqsMutex.Lock()
 	if MapHasKey(revalidateReqs, cacheKey) {
 		revalidateReqsMutex.Unlock()
@@ -484,10 +484,10 @@ func revalidateWorker(req *http.Request, respHeaders http.Header) {
 	// conditional validation if possible
 	req.Header.Del("If-None-Match")
 	req.Header.Del("If-Modified-Since")
-	if respHeaders.Get("ETag") != "" {
-		req.Header.Add("If-None-Match", strings.Join(respHeaders.Values("ETag"), ", "))
-	} else if respHeaders.Get("Date") != "" {
-		req.Header.Add("If-Modified-Since", respHeaders.Get("Date"))
+	if cacheObj.Headers.Get("ETag") != "" {
+		req.Header.Add("If-None-Match", strings.Join(cacheObj.Headers.Values("ETag"), ", "))
+	} else if cacheObj.Headers.Get("Date") != "" {
+		req.Header.Add("If-Modified-Since", cacheObj.Headers.Get("Date"))
 	}
 
 	// do request
@@ -512,11 +512,9 @@ func revalidateWorker(req *http.Request, respHeaders http.Header) {
 	req.Header.Del("If-Modified-Since")
 	if resp.StatusCode == http.StatusNotModified {
 		// update cache metadata
-		metadata := storage.StorageMetadata{
-			Updated: time.Now(),
-			Vary:    varyHeadersAsStr(resp.Header),
-		}
-		if setMetadataTimes(&metadata, respHeaders) != nil {
+		metadata := cacheObj.Metadata
+		metadata.Updated = time.Now()
+		if setMetadataTimes(&metadata, cacheObj.Headers) != nil {
 			return
 		}
 		if err := cache.Update(req, metadata); err != nil {
