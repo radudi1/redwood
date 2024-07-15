@@ -13,4 +13,5 @@ type StorageBackend interface {
 	Set(key string, backendObj *BackendObject) error
 	Update(key string, metadata *StorageMetadata) error
 	Has(key string) bool
+	Del(key string) error
 }

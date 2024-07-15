@@ -35,6 +35,7 @@ var (
 	ErrTooBig         = errors.New("storage object too big")
 	ErrTtlTooSmall    = errors.New("ttl is smaller than minimum backend storage ttl")
 	ErrInvalidBackend = errors.New("invalid backend")
+	ErrIncompleteBody = errors.New("incomplete body")
 )
 
 func (base *Base) IsCacheable(storageObj *BackendObject) error {

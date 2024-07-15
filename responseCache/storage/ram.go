@@ -55,6 +55,9 @@ func (ram *RamStorage) WriteBodyToClient(storageObj *StorageObject, w io.Writer)
 	if len(storageObj.Body) == 0 {
 		return nil
 	}
+	if len(storageObj.Body) != storageObj.Metadata.BodySize {
+		return ErrIncompleteBody
+	}
 	_, err := w.Write(storageObj.Body)
 	return err
 }
@@ -82,6 +85,11 @@ func (ram *RamStorage) Update(key string, metadata *StorageMetadata) error {
 
 func (ram *RamStorage) Has(key string) bool {
 	return ram.cache.Contains(key)
+}
+
+func (ram *RamStorage) Del(key string) error {
+	ram.cache.Remove(key)
+	return nil
 }
 
 func (ram *RamStorage) GCWorker() {
