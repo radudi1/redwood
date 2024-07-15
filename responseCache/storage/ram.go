@@ -16,12 +16,12 @@ type RamBackendConfig struct {
 type RamStorage struct {
 	Base
 	config         RamBackendConfig
-	cache          *lru.TwoQueueCache[string, *BackendObject]
+	cache          *lru.TwoQueueCache[string, BackendObject]
 	numSetsSinceGC atomic.Int64
 }
 
 func NewRamStorage(config RamBackendConfig) (*RamStorage, error) {
-	cache, err := lru.New2Q[string, *BackendObject](config.NumItems)
+	cache, err := lru.New2Q[string, BackendObject](config.NumItems)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +45,7 @@ func (ram *RamStorage) Get(key string, fields ...string) (backendObj *BackendObj
 		return nil, ErrNotFound
 	}
 	ram.counters.hits.Add(1)
-	return obj, nil
+	return &obj, nil
 }
 
 func (ram *RamStorage) WriteBodyToClient(storageObj *StorageObject, w io.Writer) error {
@@ -66,7 +66,7 @@ func (ram *RamStorage) Set(key string, backendObj *BackendObject) error {
 	if err := ram.IsCacheable(backendObj); err != nil {
 		return err
 	}
-	ram.cache.Add(key, backendObj)
+	ram.cache.Add(key, *backendObj)
 	ram.numSetsSinceGC.Add(1)
 	if ram.numSetsSinceGC.Load() > int64(ram.config.NumItems)*2 {
 		go ram.GCWorker()
@@ -80,6 +80,7 @@ func (ram *RamStorage) Update(key string, metadata *StorageMetadata) error {
 		return ErrNotFound
 	}
 	obj.Metadata = *metadata
+	ram.cache.Add(key, obj)
 	return nil
 }
 
