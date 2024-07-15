@@ -21,7 +21,7 @@ const (
 // cached bodies will be split in chunks of this size
 // the value was chosen empirically appearing to be one of the most space efficient
 // different values can grow redis object memory by tens of kB
-const BodyChunkLen = 32 * 1024
+const BodyChunkLen = 110 * 1024
 
 type StorageMetadata struct {
 	// when it was last Updated
