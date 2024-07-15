@@ -377,7 +377,9 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 		R: resp.Body,
 		N: int64(sizeLimit),
 	}
-	_, err = io.Copy(&body, lr)
+	buff := GetChunkPool().Get()
+	_, err = io.CopyBuffer(&body, lr, buff)
+	GetChunkPool().Put(buff)
 	// body, err = io.ReadAll(lr)
 	// Servers that use broken chunked Transfer-Encoding can give us unexpected EOFs,
 	// even if we got all the content.
