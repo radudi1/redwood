@@ -52,13 +52,11 @@ func (wrapper *RedisWrapper) Hmget(key string, fields ...string) (map[string][]b
 	if redisErr != nil {
 		return nil, redisErr
 	}
-	if redisArr[0].Error() != nil { // early check to avoid map allocation
-		return nil, redisArr[0].Error()
-	}
 	m := make(map[string][]byte, len(fields))
 	for i, k := range fields {
-		if redisArr[0].Error() != nil {
-			return nil, redisArr[0].Error()
+		if redisArr[i].Error() != nil {
+			m[k] = nil
+			continue
 		}
 		b, err := redisArr[i].AsBytes()
 		if err != nil {

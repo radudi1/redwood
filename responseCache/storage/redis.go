@@ -106,25 +106,41 @@ func (redis *RedisStorage) WriteBodyToClient(storageObj *StorageObject, w io.Wri
 	if storageObj.Metadata.BodySize == 0 {
 		return nil
 	}
-	chunkCnt := GetBodyChunkCnt(&storageObj.BackendObject)
-	for i := 0; i < chunkCnt; i++ {
-		query := redis.wrapper.GetConn().B().Hget().Key(storageObj.CacheKey).Field(GetBodyChunkName(i)).Build()
-		bodyBytes, err := redis.wrapper.GetConn().Do(redis.wrapper.Context, query).AsBytes()
-		if err != nil {
-			redis.counters.cacheErr.Add(1)
-			return err
-		}
-		if len(bodyBytes) < 1 {
-			redis.counters.cacheErr.Add(1)
-			return ErrNotFound
-		}
-		_, err = w.Write(bodyBytes)
-		if err != nil {
-			redis.counters.cacheErr.Add(1)
-			return err
-		}
+	nextWrite := make(chan error)
+	done := make(chan error)
+	go redis.writeBodyChunkToClient(storageObj, 0, nextWrite, done, w)
+	nextWrite <- nil
+	err := <-done
+	close(nextWrite)
+	close(done)
+	return err
+}
+
+func (redis *RedisStorage) writeBodyChunkToClient(storageObj *StorageObject, chunkIdx int, nextWrite chan error, done chan error, w io.Writer) {
+	lastChunkIdx := GetBodyChunkCnt(&storageObj.BackendObject) - 1
+	query := redis.wrapper.GetConn().B().Hget().Key(storageObj.CacheKey).Field(GetBodyChunkName(chunkIdx)).Build()
+	bodyBytes, err := redis.wrapper.GetConn().Do(redis.wrapper.Context, query).AsBytes()
+	if err == nil && len(bodyBytes) < 1 {
+		err = ErrNotFound
 	}
-	return nil
+	signalErr := <-nextWrite
+	if signalErr != nil {
+		done <- signalErr
+		return
+	}
+	if err != nil {
+		done <- err
+		return
+	}
+	if chunkIdx < lastChunkIdx {
+		go redis.writeBodyChunkToClient(storageObj, chunkIdx+1, nextWrite, done, w)
+	}
+	_, err = w.Write(bodyBytes)
+	if chunkIdx < lastChunkIdx {
+		nextWrite <- err
+	} else {
+		done <- err
+	}
 }
 
 func (redis *RedisStorage) Set(key string, backendObj *BackendObject) error {
