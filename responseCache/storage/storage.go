@@ -21,7 +21,7 @@ const (
 // cached bodies will be split in chunks of this size
 // the value was chosen empirically appearing to be one of the most space efficient
 // different values can grow redis object memory by tens of kB
-const BodyChunkLen = 110 * 1024
+const BodyChunkLen = 32 * 1024
 
 type StorageMetadata struct {
 	// when it was last Updated
@@ -118,7 +118,11 @@ func (storage *Storage) Get(key string, fields ...string) (storageObj *StorageOb
 
 func (storage *Storage) WriteBodyToClient(storageObj *StorageObject, w io.Writer) error {
 	if storageObj.Backends&RamBackend != 0 {
-		return storage.ram.WriteBodyToClient(storageObj, w)
+		err := storage.ram.WriteBodyToClient(storageObj, w)
+		if err == ErrIncompleteBody {
+			storage.Del(storageObj.CacheKey)
+		}
+		return err
 	} else if storageObj.Backends&RedisBackend != 0 {
 		mw := w
 		if storage.ram.IsCacheable(&storageObj.BackendObject) == nil {
@@ -128,7 +132,11 @@ func (storage *Storage) WriteBodyToClient(storageObj *StorageObject, w io.Writer
 				mw = io.MultiWriter(w, storageObj)
 			}
 		}
-		return storage.redis.WriteBodyToClient(storageObj, mw)
+		err := storage.redis.WriteBodyToClient(storageObj, mw)
+		if err == ErrIncompleteBody {
+			storage.Del(storageObj.CacheKey)
+		}
+		return err
 	}
 	return ErrInvalidBackend
 }
@@ -167,6 +175,15 @@ func (storage *Storage) Has(key string) bool {
 	}
 	//redis
 	return storage.redis.Has(key)
+}
+
+func (storage *Storage) Del(key string) error {
+	//ram
+	if storage.ram != nil {
+		storage.ram.Del(key)
+	}
+	//redis
+	return storage.redis.Del(key)
 }
 
 func (storage *Storage) GetChunkPool() *ChunkPool {

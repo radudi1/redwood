@@ -112,7 +112,10 @@ func (redis *RedisStorage) WriteBodyToClient(storageObj *StorageObject, w io.Wri
 	nextWrite <- nil
 	err := <-done
 	close(nextWrite)
-	close(done)
+	close(done) // detect if incomplete body is stored
+	if err == rueidis.Nil {
+		return ErrIncompleteBody
+	}
 	return err
 }
 
