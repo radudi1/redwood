@@ -88,12 +88,16 @@ func connectDirect(conn net.Conn, serverAddr string, extraData []byte, dialer *n
 
 	ulChan := make(chan int64)
 	go func() {
-		n, _ := io.Copy(conn, serverConn)
+		buff := responseCache.GetChunkPool().Get()
+		n, _ := io.CopyBuffer(conn, serverConn, buff)
+		responseCache.GetChunkPool().Put(buff)
 		time.Sleep(time.Second)
 		conn.Close()
 		ulChan <- n + int64(len(extraData))
 	}()
-	downloaded, _ = io.Copy(serverConn, conn)
+	buff := responseCache.GetChunkPool().Get()
+	downloaded, _ = io.CopyBuffer(serverConn, conn, buff)
+	responseCache.GetChunkPool().Put(buff)
 	serverConn.Close()
 	uploaded = <-ulChan
 	return uploaded, downloaded

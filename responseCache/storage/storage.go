@@ -61,12 +61,14 @@ type StorageConfig struct {
 }
 
 type Storage struct {
-	redis *RedisStorage
-	ram   *RamStorage
+	chunkPool *ChunkPool
+	redis     *RedisStorage
+	ram       *RamStorage
 }
 
 func NewStorage(config StorageConfig) (s *Storage, err error) {
 	s = &Storage{}
+	s.chunkPool = NewChunkPool(BodyChunkLen)
 	// redis
 	s.redis, err = NewRedisStorage(config.Redis)
 	if err != nil {
@@ -165,6 +167,10 @@ func (storage *Storage) Has(key string) bool {
 	}
 	//redis
 	return storage.redis.Has(key)
+}
+
+func (storage *Storage) GetChunkPool() *ChunkPool {
+	return storage.chunkPool
 }
 
 func (storage *Storage) GetRedisConn() rueidis.Client {

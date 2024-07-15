@@ -100,6 +100,10 @@ func Init() {
 
 }
 
+func GetChunkPool() *storage.ChunkPool {
+	return cache.GetStorage().GetChunkPool()
+}
+
 func cacheLog(req *http.Request, statusCode int, respHeaders http.Header, cacheStatus string, cacheKey string, stats *stopWatches) {
 	responsecacheLog(logChan, req, statusCode, respHeaders, cacheStatus, cacheKey, stats)
 }
