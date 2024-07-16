@@ -106,44 +106,61 @@ func (redis *RedisStorage) WriteBodyToClient(storageObj *StorageObject, w io.Wri
 	if storageObj.Metadata.BodySize == 0 {
 		return nil
 	}
-	nextWrite := make(chan error)
-	done := make(chan error)
-	go redis.writeBodyChunkToClient(storageObj, 0, nextWrite, done, w)
-	nextWrite <- nil
-	err := <-done
-	close(nextWrite)
-	close(done) // detect if incomplete body is stored
+	var err error
+	if storageObj.Metadata.BodySize > storageObj.Metadata.BodyChunkLen {
+		nextWrite := make(chan error)
+		done := make(chan error)
+		go redis.writeBodyChunkToClient(storageObj, 0, nextWrite, done, w)
+		nextWrite <- nil
+		err = <-done
+		close(nextWrite)
+		close(done)
+	} else {
+		err = redis.writeBodyChunkToClient(storageObj, 0, nil, nil, w)
+	}
+	// detect if incomplete body is stored
 	if err == rueidis.Nil {
 		return ErrIncompleteBody
 	}
 	return err
 }
 
-func (redis *RedisStorage) writeBodyChunkToClient(storageObj *StorageObject, chunkIdx int, nextWrite chan error, done chan error, w io.Writer) {
+func (redis *RedisStorage) writeBodyChunkToClient(storageObj *StorageObject, chunkIdx int, nextWrite chan error, done chan error, w io.Writer) error {
 	lastChunkIdx := GetBodyChunkCnt(&storageObj.BackendObject) - 1
 	query := redis.wrapper.GetConn().B().Hget().Key(storageObj.CacheKey).Field(GetBodyChunkName(chunkIdx)).Build()
 	bodyBytes, err := redis.wrapper.GetConn().Do(redis.wrapper.Context, query).AsBytes()
 	if err == nil && len(bodyBytes) < 1 {
 		err = ErrNotFound
 	}
-	signalErr := <-nextWrite
-	if signalErr != nil {
-		done <- signalErr
-		return
+	if nextWrite != nil {
+		signalErr := <-nextWrite
+		if signalErr != nil {
+			done <- signalErr
+			return signalErr
+		}
 	}
 	if err != nil {
-		done <- err
-		return
+		if done != nil {
+			done <- err
+		}
+		return err
 	}
 	if chunkIdx < lastChunkIdx {
-		go redis.writeBodyChunkToClient(storageObj, chunkIdx+1, nextWrite, done, w)
+		if nextWrite != nil && done != nil {
+			go redis.writeBodyChunkToClient(storageObj, chunkIdx+1, nextWrite, done, w)
+		} else {
+			return ErrIncompleteBodyWrite
+		}
 	}
 	_, err = w.Write(bodyBytes)
-	if chunkIdx < lastChunkIdx {
-		nextWrite <- err
-	} else {
-		done <- err
+	if nextWrite != nil && done != nil {
+		if chunkIdx < lastChunkIdx {
+			nextWrite <- err
+		} else {
+			done <- err
+		}
 	}
+	return nil
 }
 
 func (redis *RedisStorage) Set(key string, backendObj *BackendObject) error {
