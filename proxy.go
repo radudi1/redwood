@@ -437,9 +437,7 @@ func (h proxyHandler) ServeHTTPAuthenticated(w http.ResponseWriter, r *http.Requ
 	copyResponseHeader(w, resp)
 	n := int64(0)
 	if int(response.Response.StatusCode/100) != 1 && response.Response.StatusCode != 204 && response.Response.StatusCode != 304 {
-		buff := responseCache.GetChunkPool().Get()
-		n, err = io.CopyBuffer(w, response.Response.Body, buff)
-		responseCache.GetChunkPool().Put(buff)
+		n, err = responseCache.BufferedCopy(w, response.Response.Body)
 		if err != nil {
 			if err != context.Canceled {
 				log.Printf("error while copying response (URL: %s): %s", r.URL, err)
@@ -668,9 +666,7 @@ func doVirusScan(response *Response) error {
 		response.Response.Body = pr
 		go func() {
 			cr, _ := clam.ScanReader(response.Request.Request.Context(), tr)
-			buff := responseCache.GetChunkPool().Get()
-			io.CopyBuffer(ioutil.Discard, tr, buff)
-			responseCache.GetChunkPool().Put(buff)
+			responseCache.BufferedCopy(ioutil.Discard, tr)
 			pw.Close()
 			response.clamChan <- cr
 		}()
@@ -789,14 +785,10 @@ func (h proxyHandler) makeWebsocketConnection(w http.ResponseWriter, r *http.Req
 	}
 
 	go func() {
-		buff := responseCache.GetChunkPool().Get()
-		io.CopyBuffer(conn, serverConn, buff)
-		responseCache.GetChunkPool().Put(buff)
+		responseCache.BufferedCopy(conn, serverConn)
 		conn.Close()
 	}()
-	buff := responseCache.GetChunkPool().Get()
-	io.CopyBuffer(serverConn, bufrw, buff)
-	responseCache.GetChunkPool().Put(buff)
+	responseCache.BufferedCopy(serverConn, bufrw)
 	serverConn.Close()
 	return
 }

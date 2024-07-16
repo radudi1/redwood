@@ -75,9 +75,7 @@ func reEncode(dstBuf *bytes.Buffer, content []byte, fromEncoding string, acceptE
 	} else {
 		compressor = bufio.NewWriter(dstBuf)
 	}
-	buff := GetChunkPool().Get()
-	_, err := io.CopyBuffer(compressor, decompressor, buff)
-	GetChunkPool().Put(buff)
+	_, err := BufferedCopy(compressor, decompressor)
 	if err != nil {
 		resErr = err
 		return

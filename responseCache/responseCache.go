@@ -2,6 +2,7 @@ package responseCache
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/andybalholm/redwood/responseCache/storage"
+	"github.com/panjf2000/gnet/pkg/pool/byteslice"
 	"github.com/radudi1/prioworkers"
 )
 
@@ -25,6 +27,9 @@ const (
 	// request sources
 	srcClient     = 0
 	srcRevalidate = 1
+
+	// buffer size for BufferedCopy
+	copbyBuffSize = 128 * 1024
 )
 
 var (
@@ -100,8 +105,11 @@ func Init() {
 
 }
 
-func GetChunkPool() *storage.ChunkPool {
-	return cache.GetStorage().GetChunkPool()
+func BufferedCopy(dst io.Writer, src io.Reader) (n int64, err error) {
+	b := byteslice.Get(copbyBuffSize)
+	n, err = io.CopyBuffer(dst, src, b)
+	byteslice.Put(b)
+	return
 }
 
 func cacheLog(req *http.Request, statusCode int, respHeaders http.Header, cacheStatus string, cacheKey string, stats *stopWatches) {
