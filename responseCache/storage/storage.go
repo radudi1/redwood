@@ -14,6 +14,7 @@ import (
 )
 
 const (
+	// backend bits
 	RedisBackend = 1
 	RamBackend   = 2
 )
@@ -52,7 +53,7 @@ type BackendObject struct {
 type StorageObject struct {
 	BackendObject
 	CacheKey string
-	Backends int
+	Backends uint8
 }
 
 type StorageConfig struct {
@@ -86,7 +87,7 @@ func NewStorage(config StorageConfig) (s *Storage, err error) {
 
 func (storage *Storage) Get(key string, fields ...string) (storageObj *StorageObject, err error) {
 	var backendObj *BackendObject
-	var srcBackend int
+	var srcBackend uint8
 	// ram
 	if storage.ram != nil {
 		backendObj, _ = storage.ram.Get(key, fields...)
@@ -142,17 +143,25 @@ func (storage *Storage) WriteBodyToClient(storageObj *StorageObject, w io.Writer
 }
 
 func (storage *Storage) Set(storageObj *StorageObject) error {
+	var err error
 	// set chunk info
 	if len(storageObj.Body) > 0 {
 		storageObj.Metadata.BodySize = len(storageObj.Body)
 		storageObj.Metadata.BodyChunkLen = BodyChunkLen
 	}
 	// ram
-	if storage.ram != nil {
-		storage.ram.Set(storageObj.CacheKey, &storageObj.BackendObject)
+	if storage.ram != nil && storageObj.Backends&RamBackend != 0 {
+		if storage.ram.Set(storageObj.CacheKey, &storageObj.BackendObject) != nil {
+			storageObj.Backends = storageObj.Backends &^ RamBackend
+		}
 	}
 	// redis
-	err := storage.redis.Set(storageObj.CacheKey, &storageObj.BackendObject)
+	if storage.redis != nil && storageObj.Backends&RedisBackend != 0 {
+		err = storage.redis.Set(storageObj.CacheKey, &storageObj.BackendObject)
+		if err != nil {
+			storageObj.Backends = storageObj.Backends &^ RedisBackend
+		}
+	}
 	return err
 }
 
