@@ -41,6 +41,7 @@ func (ram *RamStorage) Get(key string, fields ...string) (backendObj *BackendObj
 	}
 	if obj.Metadata.Expires.Before(time.Now()) {
 		ram.cache.Remove(key)
+		ram.numSetsSinceGC.Add(-1)
 		ram.counters.misses.Add(1)
 		return nil, ErrNotFound
 	}
@@ -68,7 +69,7 @@ func (ram *RamStorage) Set(key string, backendObj *BackendObject) error {
 	}
 	ram.cache.Add(key, *backendObj)
 	ram.numSetsSinceGC.Add(1)
-	if ram.numSetsSinceGC.Load() > int64(ram.config.NumItems)*2 {
+	if ram.numSetsSinceGC.Load() > int64(ram.config.NumItems) {
 		go ram.GCWorker()
 	}
 	return nil
@@ -90,6 +91,7 @@ func (ram *RamStorage) Has(key string) bool {
 
 func (ram *RamStorage) Del(key string) error {
 	ram.cache.Remove(key)
+	ram.numSetsSinceGC.Add(-1)
 	return nil
 }
 
