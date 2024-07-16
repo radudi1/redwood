@@ -53,14 +53,15 @@ func (cache *Cache) Get(req *http.Request, fields ...string) (cacheObj *CacheObj
 		StorageObject:    *storageObj,
 		MetadataCacheKey: metadataKey,
 	}
-	if len(cacheObj.Metadata.Vary) == 0 {
+	cacheObj.CacheKey = getCacheKey(req, varyVals(cacheObj.Metadata.Vary, req.Header))
+	if metadataKey == cacheObj.CacheKey {
 		return
 	}
 
 	// if it's not the real object get the real object and return it
-	cacheKey := getCacheKey(req, varyVals(cacheObj.Metadata.Vary, req.Header))
-	storageObj, err = cache.storage.Get(cacheKey, fields...)
+	storageObj, err = cache.storage.Get(cacheObj.CacheKey, fields...)
 	if err != nil {
+		cacheObj = nil
 		return
 	}
 	cacheObj.StorageObject = *storageObj
@@ -75,24 +76,28 @@ func (cache *Cache) WriteBodyToClient(cacheObj *CacheObject, w io.Writer) error 
 func (cache *Cache) Set(statusCode int, metadata storage.StorageMetadata, req *http.Request, respHeaders http.Header, body []byte) error {
 
 	// init
-	storageObj := &storage.StorageObject{}
+	storageObj := &storage.StorageObject{
+		Backends: 0xff,
+	}
 	storageObj.Metadata = metadata
+	metadataKey := getCacheKey(req, "")
+	cacheKey := getCacheKey(req, varyVals(metadata.Vary, req.Header))
 
 	// if it has vary headers we need to store metadata-only object
 	// we assume that requests that vary have the same caching directives for all variations
-	if len(metadata.Vary) > 0 {
-		storageObj.CacheKey = getCacheKey(req, "")
+	if metadataKey != cacheKey {
+		storageObj.CacheKey = metadataKey
 		err := cache.storage.Set(storageObj)
-		if err != nil {
+		if err != nil && storageObj.Backends == 0 {
 			return err
 		}
 	}
 
 	// set the real cache object
+	storageObj.CacheKey = cacheKey
 	storageObj.StatusCode = statusCode
 	storageObj.Headers = respHeaders
 	storageObj.Body = body
-	storageObj.CacheKey = getCacheKey(req, varyVals(metadata.Vary, req.Header))
 	err := cache.storage.Set(storageObj)
 	return err
 
@@ -103,12 +108,12 @@ func (cache *Cache) Update(req *http.Request, metadata storage.StorageMetadata) 
 	// update metadata for the main cache entry (the one without vary)
 	cacheKey := getCacheKey(req, "")
 	err := cache.storage.Update(cacheKey, &metadata)
-	if err != nil {
+	if err != nil && metadata.Vary == "" {
 		return err
 	}
 
 	// if vary headers are present update metadata for the actual cache object
-	if len(metadata.Vary) > 0 {
+	if metadata.Vary == "" {
 		cacheKey = getCacheKey(req, varyVals(metadata.Vary, req.Header))
 		err := cache.storage.Update(cacheKey, &metadata)
 		if err != nil {
