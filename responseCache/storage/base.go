@@ -31,11 +31,12 @@ type Base struct {
 }
 
 var (
-	ErrNotFound       = errors.New("storage object not found")
-	ErrTooBig         = errors.New("storage object too big")
-	ErrTtlTooSmall    = errors.New("ttl is smaller than minimum backend storage ttl")
-	ErrInvalidBackend = errors.New("invalid backend")
-	ErrIncompleteBody = errors.New("incomplete body")
+	ErrNotFound            = errors.New("storage object not found")
+	ErrTooBig              = errors.New("storage object too big")
+	ErrTtlTooSmall         = errors.New("ttl is smaller than minimum backend storage ttl")
+	ErrInvalidBackend      = errors.New("invalid backend")
+	ErrIncompleteBody      = errors.New("incomplete body")
+	ErrIncompleteBodyWrite = errors.New("incomplete body write")
 )
 
 func (base *Base) IsCacheable(storageObj *BackendObject) error {
