@@ -5,8 +5,10 @@ import (
 	"io"
 	"log"
 	"strconv"
+	"sync"
 
 	"github.com/redis/rueidis"
+	"github.com/zeebo/xxh3"
 
 	"github.com/andybalholm/redwood/responseCache/storage/wrappers"
 )
@@ -18,8 +20,9 @@ type RedisBackendConfig struct {
 
 type RedisStorage struct {
 	Base
-	config  RedisBackendConfig
-	wrapper *wrappers.RedisWrapper
+	config     RedisBackendConfig
+	wrapper    *wrappers.RedisWrapper
+	keyMutexes [65536]sync.RWMutex
 }
 
 var ErrChunkSizeMismatch = errors.New("chunk size does not match metadata chunk size")
@@ -38,6 +41,11 @@ func (redis *RedisStorage) Get(key string, fields ...string) (backendObj *Backen
 
 	var serFields map[string][]byte
 	var redisErr error
+
+	// lock key for reading
+	keyMutex := redis.getMutex(key)
+	keyMutex.RLock()
+	defer keyMutex.RUnlock()
 
 	serFields, redisErr = redis.wrapper.Hmget(key, fields...)
 	if redisErr != nil {
@@ -103,6 +111,10 @@ func (redis *RedisStorage) Get(key string, fields ...string) (backendObj *Backen
 }
 
 func (redis *RedisStorage) WriteBodyToClient(storageObj *StorageObject, w io.Writer) error {
+	// lock key for reading
+	keyMutex := redis.getMutex(storageObj.CacheKey)
+	keyMutex.RLock()
+	defer keyMutex.RUnlock()
 	if storageObj.Metadata.BodySize == 0 {
 		return nil
 	}
@@ -165,60 +177,90 @@ func (redis *RedisStorage) writeBodyChunkToClient(storageObj *StorageObject, chu
 
 func (redis *RedisStorage) Set(key string, backendObj *BackendObject) error {
 
+	// check that object is cacheable - otherwise there's nothing there to do
 	if err := redis.IsCacheable(backendObj); err != nil {
 		return err
 	}
 
-	metadataSer, serErr := Serialize(backendObj.Metadata)
-	if serErr != nil {
-		redis.counters.serErr.Add(1)
-		return serErr
-	}
+	// lock current key for writing
+	keyMutex := redis.getMutex(key)
+	keyMutex.Lock()
+	defer keyMutex.Unlock()
 
-	query := redis.wrapper.GetConn().B().Hset().Key(key).FieldValue().FieldValue("metadata", string(metadataSer))
-
-	if backendObj.Headers != nil {
-		headersSer, serErr := Serialize(backendObj.Headers)
-		if serErr != nil {
-			redis.counters.serErr.Add(1)
-			return serErr
-		}
-		query = query.FieldValue("statusCode", strconv.Itoa(backendObj.StatusCode)).FieldValue("headers", string(headersSer))
-	}
-
-	redisErr := redis.wrapper.GetConn().Do(redis.wrapper.Context, query.Build()).Error()
-	if redisErr != nil {
-		redis.counters.cacheErr.Add(1)
-		return redisErr
-	}
-	if redisErr = redis.expire(key, &backendObj.Metadata); redisErr != nil {
-		redis.counters.cacheErr.Add(1)
-		return redisErr
-	}
-
+	// set body first (if any) in order to have complete data on get
 	if len(backendObj.Body) > 0 {
+		// delete old object in order to simulate cache object write atomicity
+		if delErr := redis.Del(key); delErr != nil {
+			return delErr
+		}
 		chunkCnt := backendObj.Metadata.BodySize/backendObj.Metadata.BodyChunkLen + 1
 		for i := 0; i < chunkCnt; i++ {
 			chunkName := GetBodyChunkName(i)
 			chunkStart := i * backendObj.Metadata.BodyChunkLen
 			chunkEnd := min(chunkStart+backendObj.Metadata.BodyChunkLen, len(backendObj.Body))
-			query = redis.wrapper.GetConn().B().Hset().Key(key).FieldValue().FieldValue(chunkName, string(backendObj.Body[chunkStart:chunkEnd]))
+			query := redis.wrapper.GetConn().B().Hset().Key(key).FieldValue().FieldValue(chunkName, string(backendObj.Body[chunkStart:chunkEnd]))
 			redisErr := redis.wrapper.GetConn().Do(redis.wrapper.Context, query.Build()).Error()
 			if redisErr != nil {
 				redis.counters.cacheErr.Add(1)
 				// if we can't write the entire body try to delete the entire key so that we don't have partial (incorrect) objects in cache
 				if delErr := redis.Del(key); delErr != nil {
-					log.Println("WARNING! Could not delete incomplete redis cache key. You will have INCORRECT responses from redis cache")
+					log.Println("WARNING! Could not delete incomplete redis cache key. You will have lingering objects in redis cache")
 				}
 				return redisErr
 			}
 		}
 	}
 
+	// serialize metadata
+	metadataSer, serErr := Serialize(backendObj.Metadata)
+	if serErr != nil {
+		redis.counters.serErr.Add(1)
+		redis.Del(key)
+		return serErr
+	}
+
+	// build redis query for metadata, headers and statusCode
+	query := redis.wrapper.GetConn().B().Hset().Key(key).FieldValue().FieldValue("metadata", string(metadataSer))
+
+	if backendObj.Headers != nil {
+		headersSer, serErr := Serialize(backendObj.Headers)
+		if serErr != nil {
+			redis.counters.serErr.Add(1)
+			redis.Del(key)
+			return serErr
+		}
+		query = query.FieldValue("statusCode", strconv.Itoa(backendObj.StatusCode)).FieldValue("headers", string(headersSer))
+	}
+
+	// execute redis query for metadata, headers and statusCode
+	redisErr := redis.wrapper.GetConn().Do(redis.wrapper.Context, query.Build()).Error()
+	if redisErr != nil {
+		redis.counters.cacheErr.Add(1)
+		redis.Del(key)
+		return redisErr
+	}
+
+	// set expiration
+	if redisErr := redis.expire(key, &backendObj.Metadata); redisErr != nil {
+		redis.counters.cacheErr.Add(1)
+		// if we can't set ttl try to delete the entire key so that we don't forever lingering incomplete objects in cache
+		if delErr := redis.Del(key); delErr != nil {
+			log.Println("WARNING! Could not delete incomplete redis cache key. You will have lingering objects in redis cache")
+		}
+		return redisErr
+	}
+
 	return nil
 }
 
 func (redis *RedisStorage) Update(key string, metadata *StorageMetadata) error {
+	// try to lock key for writing but give up if another thread is already writing
+	keyMutex := redis.getMutex(key)
+	if !keyMutex.TryLock() {
+		return nil
+	}
+	defer keyMutex.Unlock()
+	// serialize metadata
 	metadataSer, serErr := Serialize(metadata)
 	if serErr != nil {
 		redis.counters.serErr.Add(1)
@@ -276,4 +318,9 @@ func (redis *RedisStorage) expire(key string, metadata *StorageMetadata) error {
 			Timestamp(metadata.Expires.Unix()).
 			Build()).
 		Error()
+}
+
+func (redis *RedisStorage) getMutex(key string) *sync.RWMutex {
+	idx := uint16(xxh3.HashString(key))
+	return &redis.keyMutexes[idx]
 }
