@@ -556,6 +556,11 @@ func setMetadataTimes(metadata *storage.StorageMetadata, respHeaders http.Header
 		}
 	}
 
+	// make sure cache ttl (expires) is at least revalidateDeadline
+	if metadata.Expires.Before(metadata.RevalidateDeadline) {
+		metadata.Expires = metadata.RevalidateDeadline
+	}
+
 	return nil
 }
 
