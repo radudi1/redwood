@@ -124,16 +124,19 @@ func (storage *Storage) WriteBodyToClient(storageObj *StorageObject, w io.Writer
 		return err
 	} else if storageObj.Backends&RedisBackend != 0 {
 		mw := w
-		if storage.ram.IsCacheable(&storageObj.BackendObject) == nil {
-			err := storage.ram.Set(storageObj.CacheKey, &storageObj.BackendObject)
-			if err == nil {
-				storageObj.Body = make([]byte, storageObj.Metadata.BodySize)
-				mw = io.MultiWriter(w, storageObj)
-			}
+		storeInRam := storage.ram.IsCacheable(&storageObj.BackendObject) == nil
+		if storeInRam {
+			storageObj.Body = make([]byte, storageObj.Metadata.BodySize)
+			mw = io.MultiWriter(w, storageObj)
 		}
 		err := storage.redis.WriteBodyToClient(storageObj, mw)
 		if err == ErrIncompleteBody {
 			storage.Del(storageObj.CacheKey)
+		} else if storeInRam {
+			err := storage.ram.Set(storageObj.CacheKey, &storageObj.BackendObject)
+			if err == nil {
+				storage.ram.Del(storageObj.CacheKey)
+			}
 		}
 		return err
 	}
