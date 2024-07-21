@@ -134,7 +134,7 @@ func (storage *Storage) WriteBodyToClient(storageObj *StorageObject, w io.Writer
 			storage.Del(storageObj.CacheKey)
 		} else if storeInRam {
 			err := storage.ram.Set(storageObj.CacheKey, &storageObj.BackendObject)
-			if err == nil {
+			if err != nil {
 				storage.ram.Del(storageObj.CacheKey)
 			}
 		}
