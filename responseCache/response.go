@@ -458,6 +458,11 @@ func revalidateWorker(req *http.Request, cacheObj *CacheObject) {
 		defer prioworkers.WorkEnd(workerId)
 	}
 
+	// timers
+	stats := &stopWatches{}
+	stats.getSw = stopwatch.Start()
+	defer stats.getSw.Stop()
+
 	// if this is request is currently revalidating (by another goroutine) we skip it
 	cacheKey := getCacheKey(req, cacheObj.Headers.Get("Vary"))
 	revalidateReqsMutex.Lock()
@@ -518,9 +523,10 @@ func revalidateWorker(req *http.Request, cacheObj *CacheObject) {
 		if err := cache.Update(req, metadata); err != nil {
 			log.Println("Error while updating cache (revalidate):", err)
 		}
+		revalidateLog(req, resp.StatusCode, resp.Header, "NOTMODIF", cacheKey, stats)
 	} else {
 		// set new response
-		set(req, resp, &stopWatches{}, srcRevalidate)
+		set(req, resp, stats, srcRevalidate)
 	}
 
 }
