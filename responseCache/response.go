@@ -219,33 +219,46 @@ func sendResponse(req *http.Request, cacheObj *CacheObject, toClientStatusCode i
 		return true, stats
 	}
 
-	// check if body needs reencoding (compression algo not supported by client)
-	respEncoding := cacheObj.Headers.Get("Content-Encoding")
-	if respEncoding != "" {
-		acceptEncoding := splitHeader(req.Header, "Accept-Encoding", ",")
-		if !MapHasKey(acceptEncoding, respEncoding) {
-			var encodedBuf bytes.Buffer
-			encoding, reEncodeErr := reEncode(&encodedBuf, []byte(cacheObj.Body), respEncoding, acceptEncoding)
-			if reEncodeErr != nil {
-				counters.EncodeErr.Add(1)
-				log.Println("Could not reeencode cached response: ", reEncodeErr)
-				return false, stats
-			}
-			cacheObj.Body = encodedBuf.Bytes()
-			if encoding == "" {
-				cacheObj.Headers.Del("Content-Encoding")
-			} else {
-				cacheObj.Headers.Set("Content-Encoding", encoding)
-			}
-			cacheObj.Headers.Set("Content-Length", strconv.Itoa(len(cacheObj.Body)))
-		}
-	}
-
 	// send headers
 	w.WriteHeader(toClientStatusCode)
 
-	// send response body
+	// send body only if there is one
 	if cacheObj.Metadata.BodySize > 0 {
+
+		// check if body needs reencoding (compression algo not supported by client)
+		respEncoding := cacheObj.Headers.Get("Content-Encoding")
+		if respEncoding != "" {
+			acceptEncoding := splitHeader(req.Header, "Accept-Encoding", ",")
+			if !MapHasKey(acceptEncoding, respEncoding) {
+				// refetch cached object with body
+				var err error
+				cacheObj, err = cache.Get(req)
+				if err != nil {
+					log.Println("Error while fetching object from cache for re-encoding")
+					return false, stats
+				}
+				// re-encode
+				var encodedBuf bytes.Buffer
+				encoding, reEncodeErr := reEncode(&encodedBuf, []byte(cacheObj.Body), respEncoding, acceptEncoding)
+				if reEncodeErr != nil {
+					counters.EncodeErr.Add(1)
+					log.Println("Could not reeencode cached response: ", reEncodeErr)
+					return false, stats
+				}
+				cacheObj.Body = encodedBuf.Bytes()
+				if encoding == "" {
+					cacheObj.Headers.Del("Content-Encoding")
+				} else {
+					cacheObj.Headers.Set("Content-Encoding", encoding)
+				}
+				cacheObj.Headers.Set("Content-Length", strconv.Itoa(len(cacheObj.Body)))
+			}
+			// send re-encoded response body
+			w.Write(cacheObj.Body)
+			return true, stats
+		}
+
+		// send (not re-encoded) response body
 		writeErr := cache.WriteBodyToClient(cacheObj, w)
 		if writeErr != nil {
 			counters.WriteErr.Add(1)
