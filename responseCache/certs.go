@@ -89,6 +89,7 @@ func SetCertAsValid(serverCert *x509.Certificate, fakeCert *tls.Certificate) {
 		BackendObject: storage.BackendObject{
 			Metadata: metadata,
 		},
+		Backends: 0xff,
 	}
 	var err error
 	storageObj.Body, err = storage.Serialize(fakeCert.Certificate)
@@ -125,6 +126,7 @@ func SetDomainCert(serverCert *x509.Certificate, fakeCert *tls.Certificate) {
 		BackendObject: storage.BackendObject{
 			Metadata: metadata,
 		},
+		Backends: 0xff,
 	}
 	var err error
 	storageObj.Body, err = storage.Serialize(fakeCert.Certificate)
