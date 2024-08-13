@@ -11,11 +11,13 @@ import (
 )
 
 type RedisConfig struct {
-	Url                string
-	DBNum              int
-	MaxNumConn         int
-	MaxPipelineLen     int
-	PipelineDeadlineUS int
+	Url                  string
+	DBNum                int
+	NumConnectRetries    int
+	ConnectRetryInterval int
+	MaxNumConn           int
+	MaxPipelineLen       int
+	PipelineDeadlineUS   int
 }
 
 type RedisWrapper struct {
@@ -39,7 +41,13 @@ func NewRedisWrapper(config RedisConfig) (*RedisWrapper, error) {
 	opts.DisableCache = true
 	opts.MaxFlushDelay = time.Duration(config.PipelineDeadlineUS) * time.Microsecond
 	opts.RingScaleEachConn = int(math.Log2(float64(config.MaxPipelineLen)))
+	if config.NumConnectRetries < 0 {
+		config.NumConnectRetries = math.MaxInt
+	}
 	wrapper.conn, err = rueidis.NewClient(opts)
+	for i := 0; err != nil && i < config.NumConnectRetries; i++ {
+		wrapper.conn, err = rueidis.NewClient(opts)
+	}
 	if err != nil {
 		return nil, err
 	}
