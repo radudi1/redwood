@@ -54,6 +54,12 @@ Url = "redis://redishost:6379"
 # Redis DB number
 DBNum = 0
 
+# If we can't connect to Redis we will retry to connect every ConnectRetryInterval seconds for a maximum of NumConnectRetries times
+# If NumConnectRetries is set to 0 no retry will be performed and caching will be disabled
+# A negative value for NumConnectRetries is equivalent with infinite number of retries
+NumConnectRetries = -1
+ConnectRetryInterval = 1
+
 # If the response expires earlier than this many seconds from now then it will not be cached to Redis
 # If set to 0 all responses will be cached (if cacheable) to Redis
 MinTtl = 600
