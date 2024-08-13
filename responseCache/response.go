@@ -147,7 +147,6 @@ func fetchFromCache(req *http.Request, fields ...string) (cacheObj *CacheObject,
 	}
 	// check sanity
 	if cacheObj == nil {
-		log.Println("Nil cache object received for", req.Host+req.RequestURI)
 		foundAndValid = false
 		return
 	}
@@ -265,7 +264,7 @@ func sendResponse(req *http.Request, cacheObj *CacheObject, toClientStatusCode i
 			writeErr := cache.WriteBodyToClient(cacheObj, w)
 			if writeErr != nil {
 				counters.WriteErr.Add(1)
-				log.Println(writeErr)
+				log.Println(writeErr, "from cache backends", cacheObj.Backends)
 				return true, stats
 			}
 		}
