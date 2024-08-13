@@ -264,7 +264,7 @@ func sendResponse(req *http.Request, cacheObj *CacheObject, toClientStatusCode i
 			writeErr := cache.WriteBodyToClient(cacheObj, w)
 			if writeErr != nil {
 				counters.WriteErr.Add(1)
-				log.Println(writeErr, "from cache backends", cacheObj.Backends)
+				log.Println(writeErr, "for", req.Host+req.RequestURI, "from cache backends", cacheObj.Backends, cacheObj.MetadataCacheKey, cacheObj.CacheKey)
 				return true, stats
 			}
 		}
