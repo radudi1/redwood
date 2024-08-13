@@ -46,6 +46,7 @@ func NewRedisWrapper(config RedisConfig) (*RedisWrapper, error) {
 	}
 	wrapper.conn, err = rueidis.NewClient(opts)
 	for i := 0; err != nil && i < config.NumConnectRetries; i++ {
+		time.Sleep(time.Duration(config.ConnectRetryInterval) * time.Second)
 		wrapper.conn, err = rueidis.NewClient(opts)
 	}
 	if err != nil {
