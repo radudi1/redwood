@@ -3,7 +3,6 @@ package storage
 import (
 	"errors"
 	"io"
-	"log"
 	"strconv"
 	"sync"
 
@@ -45,7 +44,13 @@ func (redis *RedisStorage) Get(key string, fields ...string) (backendObj *Backen
 	// lock key for reading
 	keyMutex := redis.getMutex(key)
 	keyMutex.RLock()
-	defer keyMutex.RUnlock()
+	defer func() {
+		if backendObj == nil {
+			keyMutex.RUnlock()
+		} else {
+			backendObj.mutex = keyMutex
+		}
+	}()
 
 	serFields, redisErr = redis.wrapper.Hmget(key, fields...)
 	if redisErr != nil {
@@ -111,10 +116,6 @@ func (redis *RedisStorage) Get(key string, fields ...string) (backendObj *Backen
 }
 
 func (redis *RedisStorage) WriteBodyToClient(storageObj *StorageObject, w io.Writer) error {
-	// lock key for reading
-	keyMutex := redis.getMutex(storageObj.CacheKey)
-	keyMutex.RLock()
-	defer keyMutex.RUnlock()
 	if storageObj.Metadata.BodySize == 0 {
 		return nil
 	}
@@ -190,7 +191,7 @@ func (redis *RedisStorage) Set(key string, backendObj *BackendObject) error {
 	// set body first (if any) in order to have complete data on get
 	if len(backendObj.Body) > 0 {
 		// delete old object in order to simulate cache object write atomicity
-		if delErr := redis.Del(key); delErr != nil {
+		if delErr := redis.del(key); delErr != nil {
 			return delErr
 		}
 		chunkCnt := backendObj.Metadata.BodySize/backendObj.Metadata.BodyChunkLen + 1
@@ -203,9 +204,7 @@ func (redis *RedisStorage) Set(key string, backendObj *BackendObject) error {
 			if redisErr != nil {
 				redis.counters.cacheErr.Add(1)
 				// if we can't write the entire body try to delete the entire key so that we don't have partial (incorrect) objects in cache
-				if delErr := redis.Del(key); delErr != nil {
-					log.Println("WARNING! Could not delete incomplete redis cache key. You will have lingering objects in redis cache")
-				}
+				redis.del(key)
 				return redisErr
 			}
 		}
@@ -215,7 +214,7 @@ func (redis *RedisStorage) Set(key string, backendObj *BackendObject) error {
 	metadataSer, serErr := Serialize(backendObj.Metadata)
 	if serErr != nil {
 		redis.counters.serErr.Add(1)
-		redis.Del(key)
+		redis.del(key)
 		return serErr
 	}
 
@@ -226,7 +225,7 @@ func (redis *RedisStorage) Set(key string, backendObj *BackendObject) error {
 		headersSer, serErr := Serialize(backendObj.Headers)
 		if serErr != nil {
 			redis.counters.serErr.Add(1)
-			redis.Del(key)
+			redis.del(key)
 			return serErr
 		}
 		query = query.FieldValue("statusCode", strconv.Itoa(backendObj.StatusCode)).FieldValue("headers", string(headersSer))
@@ -236,7 +235,7 @@ func (redis *RedisStorage) Set(key string, backendObj *BackendObject) error {
 	redisErr := redis.wrapper.GetConn().Do(redis.wrapper.Context, query.Build()).Error()
 	if redisErr != nil {
 		redis.counters.cacheErr.Add(1)
-		redis.Del(key)
+		redis.del(key)
 		return redisErr
 	}
 
@@ -244,8 +243,8 @@ func (redis *RedisStorage) Set(key string, backendObj *BackendObject) error {
 	if redisErr := redis.expire(key, &backendObj.Metadata); redisErr != nil {
 		redis.counters.cacheErr.Add(1)
 		// if we can't set ttl try to delete the entire key so that we don't forever lingering incomplete objects in cache
-		if delErr := redis.Del(key); delErr != nil {
-			log.Println("WARNING! Could not delete incomplete redis cache key. You will have lingering objects in redis cache")
+		if delErr := redis.del(key); delErr != nil {
+			return delErr
 		}
 		return redisErr
 	}
@@ -300,13 +299,26 @@ func (redis *RedisStorage) Has(key string) bool {
 	return exists
 }
 
-func (redis *RedisStorage) Del(key string) error {
+// delete key without locking - for internal use only
+func (redis *RedisStorage) del(key string) error {
 	query := redis.wrapper.GetConn().B().Del().Key(key)
 	err := redis.wrapper.GetConn().Do(redis.wrapper.Context, query.Build()).Error()
 	if err != nil {
 		redis.counters.cacheErr.Add(1)
 	}
 	return err
+}
+
+func (redis *RedisStorage) Del(key string) error {
+
+	// lock current key for writing
+	keyMutex := redis.getMutex(key)
+	keyMutex.Lock()
+	defer keyMutex.Unlock()
+
+	// do the real delete
+	return redis.del(key)
+
 }
 
 // Sets redis ttl for key according to metadata

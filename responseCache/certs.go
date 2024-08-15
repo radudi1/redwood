@@ -36,6 +36,7 @@ func GetFakeCert(serverCert *x509.Certificate, privateKey crypto.PrivateKey) *tl
 		}
 		return nil
 	}
+	defer cacheObj.Close()
 	fakeCert := tls.Certificate{}
 	err = storage.Unserialize(cacheObj.Body, &fakeCert.Certificate)
 	if err != nil {
@@ -57,6 +58,7 @@ func GetDomainFakeCert(domain string, privateKey crypto.PrivateKey) *tls.Certifi
 		}
 		return nil
 	}
+	defer cacheObj.Close()
 	fakeCert := tls.Certificate{}
 	err = storage.Unserialize(cacheObj.Body, &fakeCert.Certificate)
 	if err != nil {
