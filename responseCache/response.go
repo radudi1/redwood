@@ -100,6 +100,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 	if reqETag := req.Header.Get("If-None-Match"); reqETag != "" {
 		cacheObj, cacheObjFound := fetchFromCache(req, "statusCode", "metadata", "headers")
 		if cacheObjFound {
+			defer cacheObj.Close()
 			reqETags := splitHeader(req.Header, "ETag", ",")
 			if MapHasKey(reqETags, cacheObj.Headers.Get("ETag")) {
 				return sendResponse(req, cacheObj, http.StatusNotModified, w, stats)
@@ -109,6 +110,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 	if req.Header.Get("If-Modified-Since") != "" {
 		cacheObj, cacheObjFound := fetchFromCache(req, "statusCode", "metadata", "headers")
 		if cacheObjFound {
+			defer cacheObj.Close()
 			modifiedSinceTime, err := HeaderValToTime(req.Header, "If-Modified-Since")
 			if err == nil {
 				lastModifiedTime, err := HeaderValToTime(cacheObj.Headers, "Last-Modified")
@@ -124,6 +126,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 	if req.Method == "HEAD" {
 		cacheObj, cacheObjFound := fetchFromCache(req, "statusCode", "metadata", "headers")
 		if cacheObjFound {
+			defer cacheObj.Close()
 			return sendResponse(req, cacheObj, cacheObj.StatusCode, w, stats)
 		}
 	}
@@ -133,6 +136,7 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 	if !cacheObjFound {
 		return false, stats
 	}
+	defer cacheObj.Close()
 	return sendResponse(req, cacheObj, cacheObj.StatusCode, w, stats)
 
 }

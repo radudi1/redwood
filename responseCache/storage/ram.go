@@ -67,11 +67,18 @@ func (ram *RamStorage) Set(key string, backendObj *BackendObject) error {
 	if err := ram.IsCacheable(backendObj); err != nil {
 		return err
 	}
+	// save mutex and remove it from object
+	// mutex should not be in cache
+	mutex := backendObj.mutex
+	backendObj.mutex = nil
+	// add to cache
 	ram.cache.Add(key, *backendObj)
 	ram.numSetsSinceGC.Add(1)
 	if ram.numSetsSinceGC.Load() > int64(ram.config.NumItems) {
 		go ram.GCWorker()
 	}
+	// restore mutex
+	backendObj.mutex = mutex
 	return nil
 }
 

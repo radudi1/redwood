@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/redis/rueidis"
@@ -41,6 +42,7 @@ type StorageMetadata struct {
 	BodyChunkLen int
 }
 
+// backendObjects must always be released by calling the Close method for every Get operation AFTER the object is not needed anymore
 type BackendObject struct {
 	io.Writer
 	StatusCode int
@@ -48,6 +50,7 @@ type BackendObject struct {
 	Headers    http.Header
 	Body       []byte
 	writerPos  int
+	mutex      *sync.RWMutex
 }
 
 type StorageObject struct {
@@ -64,6 +67,13 @@ type StorageConfig struct {
 type Storage struct {
 	redis *RedisStorage
 	ram   *RamStorage
+}
+
+func (obj *BackendObject) Close() {
+	if obj.mutex != nil {
+		obj.mutex.RUnlock()
+		obj.mutex = nil
+	}
 }
 
 func NewStorage(config StorageConfig) (s *Storage, err error) {
@@ -86,6 +96,12 @@ func NewStorage(config StorageConfig) (s *Storage, err error) {
 func (storage *Storage) Get(key string, fields ...string) (storageObj *StorageObject, err error) {
 	var backendObj *BackendObject
 	var srcBackend uint8
+	// ensure that if there is an error no object is returned
+	defer func() {
+		if err != nil {
+			storageObj = nil
+		}
+	}()
 	// ram
 	if storage.ram != nil {
 		backendObj, _ = storage.ram.Get(key, fields...)
@@ -119,7 +135,7 @@ func (storage *Storage) WriteBodyToClient(storageObj *StorageObject, w io.Writer
 	if storageObj.Backends&RamBackend != 0 {
 		err := storage.ram.WriteBodyToClient(storageObj, w)
 		if err == ErrIncompleteBody {
-			storage.Del(storageObj.CacheKey)
+			go storage.Del(storageObj.CacheKey)
 		}
 		return err
 	} else if storageObj.Backends&RedisBackend != 0 {
@@ -131,7 +147,7 @@ func (storage *Storage) WriteBodyToClient(storageObj *StorageObject, w io.Writer
 		}
 		err := storage.redis.WriteBodyToClient(storageObj, mw)
 		if err == ErrIncompleteBody {
-			storage.Del(storageObj.CacheKey)
+			go storage.Del(storageObj.CacheKey)
 		} else if storeInRam {
 			err := storage.ram.Set(storageObj.CacheKey, &storageObj.BackendObject)
 			if err != nil {
