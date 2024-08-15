@@ -14,6 +14,7 @@ require (
 	github.com/klauspost/compress v1.17.8
 	github.com/miekg/dns v1.1.59
 	github.com/open-ch/ja3 v1.0.1
+	github.com/panjf2000/gnet v1.6.7
 	github.com/qri-io/starlib v0.5.0
 	github.com/redis/rueidis v1.0.41
 	github.com/redis/rueidis/rueidiscompat v1.0.41
@@ -29,7 +30,6 @@ require (
 )
 
 require (
-	github.com/panjf2000/gnet v1.6.7 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 )
