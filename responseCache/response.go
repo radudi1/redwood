@@ -120,12 +120,6 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 		}
 	}
 
-	// if it's a HEAD request or has certain response status codes we don't send the body  - RFCs 2616 7230
-	// https://stackoverflow.com/questions/78182848/does-http-differentiate-between-an-empty-body-and-no-body
-	if req.Method == "HEAD" {
-		return sendResponse(req, cacheObj, cacheObj.StatusCode, w, stats)
-	}
-
 	// if we get here we send full response to client
 	return sendResponse(req, cacheObj, cacheObj.StatusCode, w, stats)
 
