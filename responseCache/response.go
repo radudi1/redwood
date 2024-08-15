@@ -218,11 +218,10 @@ func sendResponse(req *http.Request, cacheObj *CacheObject, toClientStatusCode i
 		return true, stats
 	}
 
-	// send body only if there is one
+	// check if body needs reencoding only if there is one
 	if cacheObj.Metadata.BodySize > 0 {
 
 		// check if body needs reencoding (compression algo not supported by client)
-		reencoded := false
 		respEncoding := cacheObj.Headers.Get("Content-Encoding")
 		if respEncoding != "" {
 			acceptEncoding := splitHeader(req.Header, "Accept-Encoding", ",")
@@ -249,15 +248,18 @@ func sendResponse(req *http.Request, cacheObj *CacheObject, toClientStatusCode i
 					cacheObj.Headers.Set("Content-Encoding", encoding)
 				}
 				cacheObj.Headers.Set("Content-Length", strconv.Itoa(len(cacheObj.Body)))
-				reencoded = true
 			}
 		}
+	}
 
-		// send headers
-		w.WriteHeader(toClientStatusCode)
+	// send headers
+	w.WriteHeader(toClientStatusCode)
 
-		// send response body
-		if reencoded {
+	// send body only if there is one
+	if cacheObj.Metadata.BodySize > 0 {
+		// send body directly if we already have it (possibly due to reencoding)
+		// otherwise use writer for improved efficiency and memory consumption
+		if len(cacheObj.Body) > 0 {
 			w.Write(cacheObj.Body)
 			return true, stats
 		} else {
