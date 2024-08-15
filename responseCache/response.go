@@ -96,27 +96,26 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 		return
 	}
 
+	// fetch object from cache
+	cacheObj, cacheObjFound := fetchFromCache(req, "statusCode", "metadata", "headers")
+	if !cacheObjFound {
+		return false, stats
+	}
+	defer cacheObj.Close()
+
 	// if the client just wants validation we just check if object is present and valid
 	if reqETag := req.Header.Get("If-None-Match"); reqETag != "" {
-		cacheObj, cacheObjFound := fetchFromCache(req, "statusCode", "metadata", "headers")
-		if cacheObjFound {
-			defer cacheObj.Close()
-			reqETags := splitHeader(req.Header, "ETag", ",")
-			if MapHasKey(reqETags, cacheObj.Headers.Get("ETag")) {
-				return sendResponse(req, cacheObj, http.StatusNotModified, w, stats)
-			}
+		reqETags := splitHeader(req.Header, "ETag", ",")
+		if MapHasKey(reqETags, cacheObj.Headers.Get("ETag")) {
+			return sendResponse(req, cacheObj, http.StatusNotModified, w, stats)
 		}
 	}
 	if req.Header.Get("If-Modified-Since") != "" {
-		cacheObj, cacheObjFound := fetchFromCache(req, "statusCode", "metadata", "headers")
-		if cacheObjFound {
-			defer cacheObj.Close()
-			modifiedSinceTime, err := HeaderValToTime(req.Header, "If-Modified-Since")
-			if err == nil {
-				lastModifiedTime, err := HeaderValToTime(cacheObj.Headers, "Last-Modified")
-				if err == nil && (lastModifiedTime.Equal(modifiedSinceTime) || lastModifiedTime.Before(modifiedSinceTime)) {
-					return sendResponse(req, cacheObj, http.StatusNotModified, w, stats)
-				}
+		modifiedSinceTime, err := HeaderValToTime(req.Header, "If-Modified-Since")
+		if err == nil {
+			lastModifiedTime, err := HeaderValToTime(cacheObj.Headers, "Last-Modified")
+			if err == nil && (lastModifiedTime.Equal(modifiedSinceTime) || lastModifiedTime.Before(modifiedSinceTime)) {
+				return sendResponse(req, cacheObj, http.StatusNotModified, w, stats)
 			}
 		}
 	}
@@ -124,19 +123,10 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 	// if it's a HEAD request or has certain response status codes we don't send the body  - RFCs 2616 7230
 	// https://stackoverflow.com/questions/78182848/does-http-differentiate-between-an-empty-body-and-no-body
 	if req.Method == "HEAD" {
-		cacheObj, cacheObjFound := fetchFromCache(req, "statusCode", "metadata", "headers")
-		if cacheObjFound {
-			defer cacheObj.Close()
-			return sendResponse(req, cacheObj, cacheObj.StatusCode, w, stats)
-		}
+		return sendResponse(req, cacheObj, cacheObj.StatusCode, w, stats)
 	}
 
-	// if we get here we need to fetch full object from cache
-	cacheObj, cacheObjFound := fetchFromCache(req, "statusCode", "metadata", "headers")
-	if !cacheObjFound {
-		return false, stats
-	}
-	defer cacheObj.Close()
+	// if we get here we send full response to client
 	return sendResponse(req, cacheObj, cacheObj.StatusCode, w, stats)
 
 }
