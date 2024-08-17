@@ -58,6 +58,11 @@ func (cache *Cache) Get(req *http.Request, fields ...string) (cacheObj *CacheObj
 		return
 	}
 
+	// if it's not real object release metadata object
+	if storageObj != nil {
+		storageObj.Close()
+	}
+
 	// if it's not the real object get the real object and return it
 	storageObj, err = cache.storage.Get(cacheObj.CacheKey, fields...)
 	if err != nil {

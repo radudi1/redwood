@@ -98,10 +98,12 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 
 	// fetch object from cache
 	cacheObj, cacheObjFound := fetchFromCache(req, "statusCode", "metadata", "headers")
+	if cacheObj != nil {
+		defer cacheObj.Close()
+	}
 	if !cacheObjFound {
 		return false, stats
 	}
-	defer cacheObj.Close()
 
 	// if the client just wants validation we just check if object is present and valid
 	if reqETag := req.Header.Get("If-None-Match"); reqETag != "" {
