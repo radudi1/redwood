@@ -29,6 +29,7 @@ type CacheConfig struct {
 	RestrictedMaxAge       int
 	RestrictedMimePrefixes []string
 	AutoAddToNoBump        bool
+	XCacheHeaders          uint8
 }
 
 type LogConfig struct {
