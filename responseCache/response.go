@@ -175,15 +175,15 @@ func sendResponse(req *http.Request, cacheObj *CacheObject, toClientStatusCode i
 	counters.HitBytes.Add(uint64(len(cacheObj.Headers) + len(cacheObj.Body)))
 
 	// set log status (will be modified if necessary) and hit source
-	hitSrc := "_REDIS"
+	backendName := "REDIS"
 	if (cacheObj.Backends & storage.RamBackend) != 0 {
-		hitSrc = "_RAM"
+		backendName = "RAM"
 	}
 	logStatus := "HIT"
 
 	// log on exit
 	defer func() {
-		cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, logStatus+hitSrc, cacheObj.CacheKey, stats)
+		cacheLog(req, cacheObj.StatusCode, cacheObj.Headers, logStatus+"_"+backendName, cacheObj.CacheKey, stats)
 	}()
 
 	// if not modified there's nothing there to send except status code
@@ -193,17 +193,11 @@ func sendResponse(req *http.Request, cacheObj *CacheObject, toClientStatusCode i
 		return true, stats
 	}
 
-	// copy response headers
-	for headerName, valSlice := range cacheObj.Headers {
-		for _, headerValue := range valSlice {
-			w.Header().Add(headerName, headerValue)
-		}
-	}
-
 	// if it's a HEAD request or has certain response status codes we don't send the body  - RFCs 2616 7230
 	// https://stackoverflow.com/questions/78182848/does-http-differentiate-between-an-empty-body-and-no-body
 	if req.Method == "HEAD" || int(toClientStatusCode/100) == 1 || toClientStatusCode == 204 || toClientStatusCode == 304 {
 		// send headers
+		sendHeaders(cacheObj, w, stats, backendName)
 		w.WriteHeader(toClientStatusCode)
 		return true, stats
 	}
@@ -243,10 +237,13 @@ func sendResponse(req *http.Request, cacheObj *CacheObject, toClientStatusCode i
 	}
 
 	// send headers
-	w.WriteHeader(toClientStatusCode)
+	sendHeaders(cacheObj, w, stats, backendName)
 
 	// send body only if there is one
 	if cacheObj.Metadata.BodySize > 0 {
+		if toClientStatusCode != http.StatusOK {
+			w.WriteHeader(toClientStatusCode)
+		}
 		// send body directly if we already have it (possibly due to reencoding)
 		// otherwise use writer for improved efficiency and memory consumption
 		if len(cacheObj.Body) > 0 {
@@ -260,9 +257,50 @@ func sendResponse(req *http.Request, cacheObj *CacheObject, toClientStatusCode i
 				return true, stats
 			}
 		}
+	} else {
+		w.WriteHeader(toClientStatusCode)
 	}
 
 	return true, stats
+}
+
+func sendHeaders(cacheObj *CacheObject, w http.ResponseWriter, stats *stopWatches, backendName string) {
+	// copy response headers
+	for headerName, valSlice := range cacheObj.Headers {
+		for _, headerValue := range valSlice {
+			w.Header().Add(headerName, headerValue)
+		}
+	}
+
+	// set X-Cache headers
+	if config.Cache.XCacheHeaders != 0 {
+		xCachePrefix := "X-Cache"
+		if config.Cache.XCacheHeaders&1 > 0 {
+			w.Header().Add(xCachePrefix, hostname+":HIT")
+		}
+		xCachePrefix += "-" + hostname + "-"
+		if config.Cache.XCacheHeaders&2 > 0 {
+			w.Header().Add(xCachePrefix+"backend", backendName)
+		}
+		if config.Cache.XCacheHeaders&4 > 0 {
+			w.Header().Add(xCachePrefix+"keys", cacheObj.MetadataCacheKey+" "+cacheObj.CacheKey)
+		}
+		if config.Cache.XCacheHeaders&8 > 0 {
+			w.Header().Add(xCachePrefix+"updated", cacheObj.Metadata.Updated.Format(time.RFC1123))
+			w.Header().Add(xCachePrefix+"stale", cacheObj.Metadata.Stale.Format(time.RFC1123))
+			w.Header().Add(xCachePrefix+"revalidate", cacheObj.Metadata.RevalidateDeadline.Format(time.RFC1123))
+			w.Header().Add(xCachePrefix+"expires", cacheObj.Metadata.Expires.Format(time.RFC1123))
+		}
+		if config.Cache.XCacheHeaders&16 > 0 {
+			w.Header().Add(xCachePrefix+"bodySize", strconv.FormatInt(int64(cacheObj.Metadata.BodySize), 10))
+			w.Header().Add(xCachePrefix+"bodyChunkLen", strconv.FormatInt(int64(cacheObj.Metadata.BodyChunkLen), 10))
+		}
+
+		if config.Cache.XCacheHeaders&128 > 0 {
+			w.Header().Add(xCachePrefix+"timings", stats.getSw.GetDurationSinceStart().String())
+		}
+	}
+
 }
 
 func Set(req *http.Request, resp *http.Response, stats *stopWatches) {
@@ -423,8 +461,7 @@ func setWorker(statusCode int, metadata storage.StorageMetadata, req *http.Reque
 		workerId := prioworkers.WorkStart(mainPrio)
 		defer prioworkers.WorkEnd(workerId)
 	}
-	respHeaders.Del("Age")                      // remove age because it will be incorrect when presented to client
-	respHeaders.Add("X-Cache", hostname+":HIT") // if stored response will be presented to client it will always be a hit
+	respHeaders.Del("Age") // remove age because it will be incorrect when presented to client
 	if err := cache.Set(statusCode, metadata, req, respHeaders, body); err != nil && err != storage.ErrTtlTooSmall && err != storage.ErrTooBig {
 		log.Println("Error setting cache object for ", req.RequestURI)
 		return

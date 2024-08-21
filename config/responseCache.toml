@@ -45,6 +45,16 @@ DeflateLevel = 1
 # Future connections to that domain will not be decrypted by Redwood and they will not be cached
 AutoAddToNoBump = false
 
+# XCacheHeaders controls if various X-Cache headers are sent to client for cached responses.
+# Various headers are sent when the corresponding bit is set. The values for the corresponding bits are:
+# 1 - send X-Cache: <hostname> HIT
+# 2 - send source backend
+# 4 - send cache keys
+# 8 - send Metadata times (Updated, Expires etc.)
+# 16 - send other Metadata info (body size, body chunk lenght etc.)
+# 128 - send timing information
+# Various options can be combined by adding the corresponding values
+XCacheHeaders = 1
 
 [Redis]
 
