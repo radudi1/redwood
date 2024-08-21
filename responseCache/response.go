@@ -95,6 +95,9 @@ func Get(w http.ResponseWriter, req *http.Request) (found bool, stats *stopWatch
 	if MapHasAnyKey(cacheControl, uncacheableCacheControlDirectives[:]) || cacheControl["max-age"] == "0" {
 		return
 	}
+	if req.Header.Get("Expect") != "" || req.Header.Get("Range") != "" {
+		return
+	}
 
 	// fetch object from cache
 	cacheObj, cacheObjFound := fetchFromCache(req, "statusCode", "metadata", "headers")
@@ -370,8 +373,16 @@ func set(req *http.Request, resp *http.Response, stats *stopWatches, reqSrc int)
 		logStatus = "UC_RESPCODE"
 		return
 	}
-	if req.Header.Get("Authorization") != "" || resp.Header.Get("WWW-Authenticate") != "" || strings.TrimSpace(req.Header.Get("Vary")) == "*" {
-		logStatus = "UC_AUTHVARY"
+	if req.Header.Get("Authorization") != "" || resp.Header.Get("WWW-Authenticate") != "" {
+		logStatus = "UC_AUTH"
+		return
+	}
+	if strings.TrimSpace(req.Header.Get("Vary")) == "*" {
+		logStatus = "UC_VARY"
+		return
+	}
+	if req.Header.Get("Expect") != "" {
+		logStatus = "UC_EXPECT"
 		return
 	}
 	cacheControl := splitHeader(resp.Header, "Cache-Control", ",")
