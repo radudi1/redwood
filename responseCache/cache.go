@@ -110,21 +110,24 @@ func (cache *Cache) Set(statusCode int, metadata storage.StorageMetadata, req *h
 
 func (cache *Cache) Update(req *http.Request, metadata storage.StorageMetadata) error {
 
-	// update metadata for the main cache entry (the one without vary)
-	cacheKey := getCacheKey(req, "")
+	// update metadata for the actual cache object
+	cacheKey := getCacheKey(req, varyVals(metadata.Vary, req.Header))
 	err := cache.storage.Update(cacheKey, &metadata)
-	if err != nil && metadata.Vary == "" {
+	if err != nil {
 		return err
 	}
 
-	// if vary headers are present update metadata for the actual cache object
-	if metadata.Vary == "" {
-		cacheKey = getCacheKey(req, varyVals(metadata.Vary, req.Header))
+	// update metadata for the metadata-only object
+	if metadata.Vary != "" {
+		cacheKey = getCacheKey(req, "")
+		metadata.BodySize = 0
+		metadata.BodyChunkLen = 0
 		err := cache.storage.Update(cacheKey, &metadata)
-		if err != nil {
+		if err != nil && metadata.Vary == "" {
 			return err
 		}
 	}
+
 	return nil
 }
 
