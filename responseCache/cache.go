@@ -122,13 +122,10 @@ func (cache *Cache) Update(req *http.Request, metadata storage.StorageMetadata) 
 		cacheKey = getCacheKey(req, "")
 		metadata.BodySize = 0
 		metadata.BodyChunkLen = 0
-		err := cache.storage.Update(cacheKey, &metadata)
-		if err != nil && metadata.Vary == "" {
-			return err
-		}
+		err = cache.storage.Update(cacheKey, &metadata)
 	}
 
-	return nil
+	return err
 }
 
 func (cacheObj *CacheObject) IsStale() bool {
