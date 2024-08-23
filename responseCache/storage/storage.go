@@ -216,9 +216,14 @@ func (storage *Storage) Check(msgWriter io.Writer, deleteInvalid bool) (res []Ba
 			fmt.Fprintln(msgWriter, err, backendType)
 			continue
 		}
-		fmt.Fprintln(msgWriter, "Cheking", len(keys), "keys in", backendType, "cache backend")
+		fmt.Fprint(msgWriter, "Checking ", len(keys), " keys in ", backendType, " cache backend")
 		r.TotalCnt = len(keys)
+		scannedCnt := 0
 		for _, k := range keys {
+			scannedCnt++
+			if scannedCnt%1000 == 0 {
+				fmt.Fprint(msgWriter, ".")
+			}
 			v, err := backend.Get(k, "statusCode", "metadata", "headers", "body")
 			if err != nil {
 				r.CheckErrCnt++
@@ -242,6 +247,7 @@ func (storage *Storage) Check(msgWriter io.Writer, deleteInvalid bool) (res []Ba
 				continue
 			}
 		}
+		fmt.Fprintln(msgWriter, "")
 		fmt.Fprintln(msgWriter, "Finished checking", len(keys), "keys in", backendType, "cache backend")
 		res = append(res, r)
 	}
