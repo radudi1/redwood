@@ -203,7 +203,7 @@ func (storage *Storage) Del(key string) error {
 	return storage.redis.Del(key)
 }
 
-func (storage *Storage) Check(msgWriter io.Writer, deleteInvalid bool) (res []BackendCheckResult) {
+func (storage *Storage) Check(msgWriter io.Writer, deleteInvalid bool, beforeCallback func(), afterCallback func()) (res []BackendCheckResult) {
 	for backendTypeId, backend := range storage.backends {
 		r := BackendCheckResult{
 			BackendTypeId: backendTypeId,
@@ -224,7 +224,13 @@ func (storage *Storage) Check(msgWriter io.Writer, deleteInvalid bool) (res []Ba
 			if scannedCnt%1000 == 0 {
 				fmt.Fprint(msgWriter, ".")
 			}
+			if beforeCallback != nil {
+				beforeCallback()
+			}
 			v, err := backend.Get(k, "statusCode", "metadata", "headers", "body")
+			if afterCallback != nil {
+				afterCallback()
+			}
 			if err != nil {
 				r.CheckErrCnt++
 				fmt.Fprintln(msgWriter, err, backendType, k)

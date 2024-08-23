@@ -23,6 +23,7 @@ const (
 	setWPrio        = 50
 	revalidateWPrio = 40
 	updateWPrio     = 20
+	cacheCheckPrio  = 0
 
 	// request sources
 	srcClient     = 0
@@ -221,8 +222,17 @@ func printStats() {
 }
 
 func checkCache() {
+	var beforeCallback, afterCallback func()
+	if config.Workers.PrioritiesEnabled {
+		beforeCallback = func() {
+			prioworkers.WorkStart(cacheCheckPrio)
+		}
+		afterCallback = func() {
+			prioworkers.WorkEnd(cacheCheckPrio)
+		}
+	}
 	storage := cache.GetStorage()
-	results := storage.Check(os.Stdout, config.Cache.DeleteInvalidOnCheck)
+	results := storage.Check(os.Stdout, config.Cache.DeleteInvalidOnCheck, beforeCallback, afterCallback)
 	for _, v := range results {
 		fmt.Println("")
 		fmt.Println(storage.GetBackendType(v.BackendTypeId), "CHECK")
