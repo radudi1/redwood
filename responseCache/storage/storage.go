@@ -2,12 +2,12 @@ package storage
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"slices"
 	"strconv"
-	"sync"
+	"strings"
 	"time"
 
 	"github.com/redis/rueidis"
@@ -19,6 +19,11 @@ const (
 	RedisBackend = 1
 	RamBackend   = 2
 )
+
+var backendTypeStr = map[uint8]string{
+	1: "REDIS",
+	2: "RAM",
+}
 
 // cached bodies will be split in chunks of this size
 // the value was chosen empirically appearing to be one of the most space efficient
@@ -42,17 +47,6 @@ type StorageMetadata struct {
 	BodyChunkLen int
 }
 
-// backendObjects must always be released by calling the Close method for every Get operation AFTER the object is not needed anymore
-type BackendObject struct {
-	io.Writer
-	StatusCode int
-	Metadata   StorageMetadata
-	Headers    http.Header
-	Body       []byte
-	writerPos  int
-	mutex      *sync.RWMutex
-}
-
 type StorageObject struct {
 	BackendObject
 	CacheKey string
@@ -65,30 +59,27 @@ type StorageConfig struct {
 }
 
 type Storage struct {
-	redis *RedisStorage
-	ram   *RamStorage
-}
-
-func (obj *BackendObject) Close() {
-	if obj.mutex != nil {
-		obj.mutex.RUnlock()
-		obj.mutex = nil
-	}
+	redis    *RedisStorage
+	ram      *RamStorage
+	backends map[uint8]StorageBackend
 }
 
 func NewStorage(config StorageConfig) (s *Storage, err error) {
 	s = &Storage{}
+	s.backends = make(map[uint8]StorageBackend)
 	// redis
 	s.redis, err = NewRedisStorage(config.Redis)
 	if err != nil {
 		return
 	}
+	s.backends[RedisBackend] = s.redis
 	// ram
 	if config.Ram.NumItems > 0 {
 		s.ram, err = NewRamStorage(config.Ram)
 		if err != nil {
 			return
 		}
+		s.backends[RamBackend] = s.ram
 	}
 	return
 }
@@ -210,6 +201,63 @@ func (storage *Storage) Del(key string) error {
 	}
 	//redis
 	return storage.redis.Del(key)
+}
+
+func (storage *Storage) Check(msgWriter io.Writer, deleteInvalid bool) (res []BackendCheckResult) {
+	for backendTypeId, backend := range storage.backends {
+		r := BackendCheckResult{
+			BackendTypeId: backendTypeId,
+		}
+		backendType := backendTypeStr[backendTypeId]
+		fmt.Fprintln(msgWriter, "Starting cache backend check on", backendType)
+		keys, err := backend.Keys()
+		if err != nil {
+			r.CheckErrCnt++
+			fmt.Fprintln(msgWriter, err, backendType)
+			continue
+		}
+		fmt.Fprintln(msgWriter, "Cheking", len(keys), "keys in", backendType, "cache backend")
+		r.TotalCnt = len(keys)
+		for _, k := range keys {
+			v, err := backend.Get(k, "statusCode", "metadata", "headers", "body")
+			if err != nil {
+				r.CheckErrCnt++
+				fmt.Fprintln(msgWriter, err, backendType, k)
+				continue
+			}
+			v.Close()
+			err = v.IsValid()
+			if err != nil {
+				r.InvalidCnt++
+				fmt.Fprintln(msgWriter, err, backendType, k)
+				if deleteInvalid {
+					err = backend.Del(k)
+					if err != nil {
+						r.DeleteErrCnt++
+						fmt.Fprintln(msgWriter, err, backendType, k)
+						continue
+					}
+					r.DeletedCnt++
+				}
+				continue
+			}
+		}
+		fmt.Fprintln(msgWriter, "Finished checking", len(keys), "keys in", backendType, "cache backend")
+		res = append(res, r)
+	}
+	return
+}
+
+func (storage *Storage) GetBackendType(backendTypeId uint8) string {
+	var types []string
+	mask := uint8(128)
+	for i := 0; i < 8; i++ {
+		if backendTypeId&mask != 0 {
+			types = append(types, backendTypeStr[mask])
+		}
+		mask >>= 1
+	}
+	return strings.Join(types, ",")
 }
 
 func (storage *Storage) GetRedisConn() rueidis.Client {

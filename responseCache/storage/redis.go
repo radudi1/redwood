@@ -321,6 +321,11 @@ func (redis *RedisStorage) Del(key string) error {
 
 }
 
+func (redis *RedisStorage) Keys() ([]string, error) {
+	query := redis.wrapper.GetConn().B().Keys().Pattern("*")
+	return redis.wrapper.GetConn().Do(redis.wrapper.Context, query.Build()).AsStrSlice()
+}
+
 // Sets redis ttl for key according to metadata
 func (redis *RedisStorage) expire(key string, metadata *StorageMetadata) error {
 	return redis.wrapper.GetConn().Do(

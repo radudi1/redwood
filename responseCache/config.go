@@ -30,6 +30,7 @@ type CacheConfig struct {
 	RestrictedMimePrefixes []string
 	AutoAddToNoBump        bool
 	XCacheHeaders          uint8
+	DeleteInvalidOnCheck   bool
 }
 
 type LogConfig struct {
