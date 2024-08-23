@@ -37,6 +37,7 @@ var (
 	logChan           chan string
 	revalidateLogChan chan string
 	cache             Cache
+	lastSignalTime    time.Time
 )
 
 func Init() {
@@ -167,45 +168,68 @@ func cacheLogWorker(filename string, logChan chan string) {
 // os signal processing
 func signalHandler(c chan os.Signal) {
 	for range c {
-		// nobump domains
-		fmt.Println("No-bump domains: ", noBumpDomains)
-		// channel queues
-		fmt.Println("Log queue length: ", len(logChan))
-		fmt.Println("Revalidate log queue length: ", len(revalidateLogChan))
-		// prioworkers state
-		fmt.Printf("%+v\n", prioworkers.GetState())
-		// byte counters
-		fmt.Printf("Hit MB: %d\n", counters.HitBytes.Load()/1024/1024)
-		fmt.Printf("Miss MB: %d\n", counters.MissBytes.Load()/1024/1024)
-		fmt.Printf("Uncacheable MB: %d\n", counters.UncacheableBytes.Load()/1024/1024)
-		// request counters
-		fmt.Printf("Hits: %d\n", counters.Hits.Load())
-		fmt.Printf("Misses: %d\n", counters.Misses.Load())
-		fmt.Printf("Uncacheable: %d\n", counters.Uncacheable.Load())
-		fmt.Printf("Sets: %d\n", counters.Sets.Load())
-		fmt.Printf("Updates: %d\n", counters.Updates.Load())
-		fmt.Printf("Revalidations: %d\n", counters.Revalidations.Load())
-		// ram counters
-		ramCounters := cache.storage.GetBackendCounters("ram")
-		fmt.Printf("RAM Hits: %d\n", ramCounters.Hits)
-		fmt.Printf("RAM Misses: %d\n", ramCounters.Misses)
-		fmt.Printf("RAM Hit Ratio: %d%%\n", int(ramCounters.HitRatio*100))
-		// error counters
-		storageCounters := cache.storage.GetCounters()
-		fmt.Printf("CacheErr: %d\n", storageCounters.CacheErr)
-		fmt.Printf("SerErr: %d\n", storageCounters.SerErr)
-		fmt.Printf("EncodeErr: %d\n", counters.EncodeErr.Load())
-		fmt.Printf("ReadErr: %d\n", counters.ReadErr.Load())
-		fmt.Printf("WriteErr: %d\n", counters.WriteErr.Load())
-		// ratios
-		if counters.Hits.Load()+counters.Misses.Load() == 0 { // prevent division by 0
-			continue
+		if time.Now().Sub(lastSignalTime) > 2*time.Second {
+			go printStats()
+		} else {
+			go checkCache()
 		}
-		fmt.Printf("Uncacheable Ratio: %d%%\n", counters.Uncacheable.Load()*100/(counters.Hits.Load()+counters.Misses.Load()+counters.Uncacheable.Load()))
-		fmt.Printf("Uncacheable MB Ratio: %d%%\n", counters.UncacheableBytes.Load()*100/(counters.HitBytes.Load()+counters.MissBytes.Load()+counters.UncacheableBytes.Load()))
-		fmt.Printf("Cacheable Hit Ratio: %d%%\n", counters.Hits.Load()*100/(counters.Hits.Load()+counters.Misses.Load()))
-		fmt.Printf("Cacheable Hit MB Ratio: %d%%\n", counters.HitBytes.Load()*100/(counters.HitBytes.Load()+counters.MissBytes.Load()))
-		fmt.Printf("Total Hit Ratio: %d%%\n", counters.Hits.Load()*100/(counters.Hits.Load()+counters.Misses.Load()+counters.Uncacheable.Load()))
-		fmt.Printf("Total Hit MB Ratio: %d%%\n", counters.HitBytes.Load()*100/(counters.HitBytes.Load()+counters.MissBytes.Load()+counters.UncacheableBytes.Load()))
+		lastSignalTime = time.Now()
+	}
+}
+
+func printStats() {
+	// nobump domains
+	fmt.Println("No-bump domains: ", noBumpDomains)
+	// channel queues
+	fmt.Println("Log queue length: ", len(logChan))
+	fmt.Println("Revalidate log queue length: ", len(revalidateLogChan))
+	// prioworkers state
+	fmt.Printf("%+v\n", prioworkers.GetState())
+	// byte counters
+	fmt.Printf("Hit MB: %d\n", counters.HitBytes.Load()/1024/1024)
+	fmt.Printf("Miss MB: %d\n", counters.MissBytes.Load()/1024/1024)
+	fmt.Printf("Uncacheable MB: %d\n", counters.UncacheableBytes.Load()/1024/1024)
+	// request counters
+	fmt.Printf("Hits: %d\n", counters.Hits.Load())
+	fmt.Printf("Misses: %d\n", counters.Misses.Load())
+	fmt.Printf("Uncacheable: %d\n", counters.Uncacheable.Load())
+	fmt.Printf("Sets: %d\n", counters.Sets.Load())
+	fmt.Printf("Updates: %d\n", counters.Updates.Load())
+	fmt.Printf("Revalidations: %d\n", counters.Revalidations.Load())
+	// ram counters
+	ramCounters := cache.storage.GetBackendCounters("ram")
+	fmt.Printf("RAM Hits: %d\n", ramCounters.Hits)
+	fmt.Printf("RAM Misses: %d\n", ramCounters.Misses)
+	fmt.Printf("RAM Hit Ratio: %d%%\n", int(ramCounters.HitRatio*100))
+	// error counters
+	storageCounters := cache.storage.GetCounters()
+	fmt.Printf("CacheErr: %d\n", storageCounters.CacheErr)
+	fmt.Printf("SerErr: %d\n", storageCounters.SerErr)
+	fmt.Printf("EncodeErr: %d\n", counters.EncodeErr.Load())
+	fmt.Printf("ReadErr: %d\n", counters.ReadErr.Load())
+	fmt.Printf("WriteErr: %d\n", counters.WriteErr.Load())
+	// ratios
+	if counters.Hits.Load()+counters.Misses.Load() == 0 { // prevent division by 0
+		return
+	}
+	fmt.Printf("Uncacheable Ratio: %d%%\n", counters.Uncacheable.Load()*100/(counters.Hits.Load()+counters.Misses.Load()+counters.Uncacheable.Load()))
+	fmt.Printf("Uncacheable MB Ratio: %d%%\n", counters.UncacheableBytes.Load()*100/(counters.HitBytes.Load()+counters.MissBytes.Load()+counters.UncacheableBytes.Load()))
+	fmt.Printf("Cacheable Hit Ratio: %d%%\n", counters.Hits.Load()*100/(counters.Hits.Load()+counters.Misses.Load()))
+	fmt.Printf("Cacheable Hit MB Ratio: %d%%\n", counters.HitBytes.Load()*100/(counters.HitBytes.Load()+counters.MissBytes.Load()))
+	fmt.Printf("Total Hit Ratio: %d%%\n", counters.Hits.Load()*100/(counters.Hits.Load()+counters.Misses.Load()+counters.Uncacheable.Load()))
+	fmt.Printf("Total Hit MB Ratio: %d%%\n", counters.HitBytes.Load()*100/(counters.HitBytes.Load()+counters.MissBytes.Load()+counters.UncacheableBytes.Load()))
+}
+
+func checkCache() {
+	storage := cache.GetStorage()
+	results := storage.Check(os.Stdout, config.Cache.DeleteInvalidOnCheck)
+	for _, v := range results {
+		fmt.Println("")
+		fmt.Println(storage.GetBackendType(v.BackendTypeId), "CHECK")
+		fmt.Println("Total objects", v.TotalCnt)
+		fmt.Println("Invalid objects", v.InvalidCnt)
+		fmt.Println("Deleted invalid objects", v.DeletedCnt)
+		fmt.Println("Check errors", v.CheckErrCnt)
+		fmt.Println("Delete errors", v.DeleteErrCnt)
 	}
 }

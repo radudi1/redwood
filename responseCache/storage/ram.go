@@ -102,6 +102,10 @@ func (ram *RamStorage) Del(key string) error {
 	return nil
 }
 
+func (ram *RamStorage) Keys() ([]string, error) {
+	return ram.cache.Keys(), nil
+}
+
 func (ram *RamStorage) GCWorker() {
 	for _, key := range ram.cache.Keys() {
 		obj, ok := ram.cache.Peek(key)

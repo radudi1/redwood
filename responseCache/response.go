@@ -474,6 +474,7 @@ func setWorker(statusCode int, metadata storage.StorageMetadata, req *http.Reque
 	}
 	respHeaders.Del("Age") // remove age because it will be incorrect when presented to client
 	if err := cache.Set(statusCode, metadata, req, respHeaders, body); err != nil && err != storage.ErrTtlTooSmall && err != storage.ErrTooBig {
+		log.Println(err)
 		log.Println("Error setting cache object for ", req.RequestURI)
 		return
 	}

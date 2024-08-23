@@ -56,6 +56,10 @@ AutoAddToNoBump = false
 # Various options can be combined by adding the corresponding values
 XCacheHeaders = 1
 
+# Is set to true cache sanity check deletes invalid objects
+DeleteInvalidOnCheck = true
+
+
 [Redis]
 
 # Redis url to connect to - this is where cache will be saved
