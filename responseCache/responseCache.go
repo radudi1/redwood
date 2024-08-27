@@ -169,7 +169,7 @@ func cacheLogWorker(filename string, logChan chan string) {
 // os signal processing
 func signalHandler(c chan os.Signal) {
 	for range c {
-		if time.Now().Sub(lastSignalTime) > 2*time.Second {
+		if time.Since(lastSignalTime) > 2*time.Second {
 			go printStats()
 		} else {
 			go checkCache()
