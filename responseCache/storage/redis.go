@@ -5,6 +5,7 @@ import (
 	"io"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/redis/rueidis"
 	"github.com/zeebo/xxh3"
@@ -71,6 +72,13 @@ func (redis *RedisStorage) Get(key string, fields ...string) (backendObj *Backen
 
 	if err = Unserialize(serFields["metadata"], &backendObj.Metadata); err != nil {
 		redis.counters.serErr.Add(1)
+		return
+	}
+
+	if backendObj.Metadata.Expires.Before(time.Now()) {
+		go redis.Del(key)
+		backendObj = nil
+		err = ErrNotFound
 		return
 	}
 
