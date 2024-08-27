@@ -232,8 +232,10 @@ func (storage *Storage) Check(msgWriter io.Writer, deleteInvalid bool, beforeCal
 				afterCallback()
 			}
 			if err != nil {
-				r.CheckErrCnt++
-				fmt.Fprintln(msgWriter, err, backendType, k)
+				if err != ErrNotFound {
+					r.CheckErrCnt++
+					fmt.Fprintln(msgWriter, err, backendType, k)
+				}
 				continue
 			}
 			v.Close()
@@ -255,6 +257,7 @@ func (storage *Storage) Check(msgWriter io.Writer, deleteInvalid bool, beforeCal
 		}
 		fmt.Fprintln(msgWriter, "")
 		fmt.Fprintln(msgWriter, "Finished checking", len(keys), "keys in", backendType, "cache backend")
+		fmt.Println(msgWriter, "")
 		res = append(res, r)
 	}
 	return
