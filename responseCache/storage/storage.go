@@ -152,11 +152,9 @@ func (storage *Storage) WriteBodyToClient(storageObj *StorageObject, w io.Writer
 
 func (storage *Storage) Set(storageObj *StorageObject) error {
 	var err error
-	// set chunk info
-	if len(storageObj.Body) > 0 {
-		storageObj.Metadata.BodySize = len(storageObj.Body)
-		storageObj.Metadata.BodyChunkLen = BodyChunkLen
-	}
+	// set body size and chunk info
+	storageObj.Metadata.BodySize = len(storageObj.Body)
+	storageObj.Metadata.BodyChunkLen = BodyChunkLen
 	// ram
 	if storage.ram != nil && storageObj.Backends&RamBackend != 0 {
 		if storage.ram.Set(storageObj.CacheKey, &storageObj.BackendObject) != nil {
