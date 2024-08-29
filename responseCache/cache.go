@@ -119,10 +119,13 @@ func (cache *Cache) Update(req *http.Request, metadata storage.StorageMetadata) 
 
 	// update metadata for the metadata-only object
 	if metadata.Vary != "" {
-		cacheKey = getCacheKey(req, "")
+		metadataKey := getCacheKey(req, "")
+		if metadataKey == cacheKey {
+			return err
+		}
 		metadata.BodySize = 0
 		metadata.BodyChunkLen = 0
-		err = cache.storage.Update(cacheKey, &metadata)
+		err = cache.storage.Update(metadataKey, &metadata)
 	}
 
 	return err
