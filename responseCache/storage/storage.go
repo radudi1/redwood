@@ -137,9 +137,13 @@ func (storage *Storage) WriteBodyToClient(storageObj *StorageObject, w io.Writer
 			mw = io.MultiWriter(w, storageObj)
 		}
 		err := storage.redis.WriteBodyToClient(storageObj, mw)
-		if err == ErrIncompleteBody {
-			go storage.Del(storageObj.CacheKey)
-		} else if storeInRam {
+		if err != nil {
+			if err == ErrIncompleteBody {
+				go storage.redis.Del(storageObj.CacheKey)
+			}
+			return err
+		}
+		if storeInRam {
 			err := storage.ram.Set(storageObj.CacheKey, &storageObj.BackendObject)
 			if err != nil {
 				storage.ram.Del(storageObj.CacheKey)
