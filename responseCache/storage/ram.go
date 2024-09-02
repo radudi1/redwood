@@ -59,7 +59,7 @@ func (ram *RamStorage) Get(key string, fields ...string) (backendObj *BackendObj
 }
 
 func (ram *RamStorage) WriteBodyToClient(storageObj *StorageObject, w io.Writer) error {
-	if storageObj == nil {
+	if storageObj == nil || storageObj.Backends&RamBackend == 0 {
 		return ErrNotFound
 	}
 	if len(storageObj.Body) == 0 {
