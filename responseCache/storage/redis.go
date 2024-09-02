@@ -144,6 +144,9 @@ func (redis *RedisStorage) Get(key string, fields ...string) (backendObj *Backen
 }
 
 func (redis *RedisStorage) WriteBodyToClient(storageObj *StorageObject, w io.Writer) error {
+	if storageObj == nil || storageObj.Backends&RedisBackend == 0 {
+		return ErrNotFound
+	}
 	if storageObj.Metadata.BodySize == 0 {
 		return nil
 	}
