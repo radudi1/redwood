@@ -293,11 +293,11 @@ func (storage *Storage) GetCounters() Counters {
 	return counters
 }
 
-func (storage *Storage) GetBackendCounters(backend string) Counters {
-	switch backend {
-	case "redis":
+func (storage *Storage) GetBackendCounters(backendTypeId uint8) Counters {
+	switch backendTypeId {
+	case RedisBackend:
 		return storage.redis.GetCounters()
-	case "ram":
+	case RamBackend:
 		if storage.ram != nil {
 			return storage.ram.GetCounters()
 		}

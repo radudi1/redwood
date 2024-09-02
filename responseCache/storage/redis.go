@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/radudi1/stopwatch"
 	"github.com/redis/rueidis"
 	"github.com/zeebo/xxh3"
 
@@ -41,6 +42,15 @@ func (redis *RedisStorage) Get(key string, fields ...string) (backendObj *Backen
 
 	var serFields map[string][]byte
 	var redisErr error
+	var redisBytes int
+
+	sw := stopwatch.Start()
+	defer func() {
+		if err != nil {
+			redis.counters.getNanoseconds.Add(uint64(sw.GetRunningDuration().Nanoseconds()))
+			redis.counters.gets.Add(1)
+		}
+	}()
 
 	// lock key for reading
 	keyMutex := redis.getMutex(key)
@@ -65,8 +75,10 @@ func (redis *RedisStorage) Get(key string, fields ...string) (backendObj *Backen
 	}
 	if len(serFields["metadata"]) < 1 { // object was not found
 		redis.counters.misses.Add(1)
-		return nil, ErrNotFound
+		err = ErrNotFound
+		return
 	}
+	redisBytes += len(serFields["metadata"])
 
 	backendObj = &BackendObject{}
 
@@ -83,6 +95,7 @@ func (redis *RedisStorage) Get(key string, fields ...string) (backendObj *Backen
 	}
 
 	if len(serFields["statusCode"]) > 0 {
+		redisBytes += len(serFields["statusCode"])
 		var statusCode int64
 		statusCode, err = strconv.ParseInt(string(serFields["statusCode"]), 10, 64)
 		if err != nil {
@@ -92,6 +105,7 @@ func (redis *RedisStorage) Get(key string, fields ...string) (backendObj *Backen
 	}
 
 	if len(serFields["headers"]) > 0 {
+		redisBytes += len(serFields["headers"])
 		if err = Unserialize(serFields["headers"], &backendObj.Headers); err != nil {
 			redis.counters.serErr.Add(1)
 			return
@@ -99,6 +113,7 @@ func (redis *RedisStorage) Get(key string, fields ...string) (backendObj *Backen
 	}
 
 	if len(serFields["body"]) > 0 {
+		redisBytes += len(serFields["body"])
 		if backendObj.Metadata.BodyChunkLen > 0 {
 			chunkCnt := GetBodyChunkCnt(backendObj)
 			backendObj.Body = make([]byte, chunkCnt*backendObj.Metadata.BodyChunkLen)
@@ -119,6 +134,11 @@ func (redis *RedisStorage) Get(key string, fields ...string) (backendObj *Backen
 		}
 	}
 
+	redis.counters.getNanoseconds.Add(uint64(sw.GetRunningDuration().Nanoseconds()))
+	redis.counters.gets.Add(1)
+	if redisBytes > 0 {
+		redis.counters.getBytes.Add(uint64(redisBytes))
+	}
 	redis.counters.hits.Add(1)
 	return
 }
@@ -147,9 +167,15 @@ func (redis *RedisStorage) WriteBodyToClient(storageObj *StorageObject, w io.Wri
 }
 
 func (redis *RedisStorage) writeBodyChunkToClient(storageObj *StorageObject, chunkIdx int, nextWrite chan error, done chan error, w io.Writer) error {
+	sw := stopwatch.Start()
 	lastChunkIdx := GetBodyChunkCnt(&storageObj.BackendObject) - 1
 	query := redis.wrapper.GetConn().B().Hget().Key(storageObj.CacheKey).Field(GetBodyChunkName(chunkIdx)).Build()
 	bodyBytes, err := redis.wrapper.GetConn().Do(redis.wrapper.Context, query).AsBytes()
+	redis.counters.getNanoseconds.Add(uint64(sw.GetRunningDuration().Nanoseconds()))
+	redis.counters.gets.Add(1)
+	if len(bodyBytes) > 0 {
+		redis.counters.getBytes.Add(uint64(len(bodyBytes)))
+	}
 	if err == nil && len(bodyBytes) < 1 {
 		err = ErrNotFound
 	}
@@ -191,6 +217,17 @@ func (redis *RedisStorage) Set(key string, backendObj *BackendObject) error {
 		return err
 	}
 
+	var redisBytes int
+
+	sw := stopwatch.Start()
+	defer func() {
+		redis.counters.setNanoseconds.Add(uint64(sw.GetRunningDuration().Nanoseconds()))
+		redis.counters.sets.Add(1)
+		if redisBytes > 0 {
+			redis.counters.setBytes.Add(uint64(redisBytes))
+		}
+	}()
+
 	// lock current key for writing
 	keyMutex := redis.getMutex(key)
 	keyMutex.Lock()
@@ -215,6 +252,7 @@ func (redis *RedisStorage) Set(key string, backendObj *BackendObject) error {
 				redis.del(key)
 				return redisErr
 			}
+			redisBytes += chunkEnd - chunkStart
 		}
 	}
 
@@ -229,8 +267,9 @@ func (redis *RedisStorage) Set(key string, backendObj *BackendObject) error {
 	// build redis query for metadata, headers and statusCode
 	query := redis.wrapper.GetConn().B().Hset().Key(key).FieldValue().FieldValue("metadata", string(metadataSer))
 
+	var headersSer []byte
 	if backendObj.Headers != nil {
-		headersSer, serErr := Serialize(backendObj.Headers)
+		headersSer, serErr = Serialize(backendObj.Headers)
 		if serErr != nil {
 			redis.counters.serErr.Add(1)
 			redis.del(key)
@@ -246,6 +285,7 @@ func (redis *RedisStorage) Set(key string, backendObj *BackendObject) error {
 		redis.del(key)
 		return redisErr
 	}
+	redisBytes += len(metadataSer) + len(headersSer)
 
 	// set expiration
 	if redisErr := redis.expire(key, &backendObj.Metadata); redisErr != nil {

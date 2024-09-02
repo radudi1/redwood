@@ -6,6 +6,7 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/radudi1/stopwatch"
 )
 
 type RamBackendConfig struct {
@@ -34,6 +35,14 @@ func NewRamStorage(config RamBackendConfig) (*RamStorage, error) {
 }
 
 func (ram *RamStorage) Get(key string, fields ...string) (backendObj *BackendObject, err error) {
+	sw := stopwatch.Start()
+	defer func() {
+		ram.counters.getNanoseconds.Add(uint64(sw.GetRunningDuration().Nanoseconds()))
+		ram.counters.gets.Add(1)
+		if backendObj != nil {
+			ram.counters.getBytes.Add(uint64(len(backendObj.Body)))
+		}
+	}()
 	obj, ok := ram.cache.Get(key)
 	if !ok {
 		ram.counters.misses.Add(1)
@@ -67,6 +76,14 @@ func (ram *RamStorage) Set(key string, backendObj *BackendObject) error {
 	if err := ram.IsCacheable(backendObj); err != nil {
 		return err
 	}
+	sw := stopwatch.Start()
+	defer func() {
+		ram.counters.setNanoseconds.Add(uint64(sw.GetRunningDuration().Nanoseconds()))
+		ram.counters.sets.Add(1)
+		if backendObj != nil {
+			ram.counters.setBytes.Add(uint64(len(backendObj.Body)))
+		}
+	}()
 	// save mutex and remove it from object
 	// mutex should not be in cache
 	mutex := backendObj.mutex

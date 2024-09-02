@@ -198,10 +198,20 @@ func printStats() {
 	fmt.Printf("Updates: %d\n", counters.Updates.Load())
 	fmt.Printf("Revalidations: %d\n", counters.Revalidations.Load())
 	// ram counters
-	ramCounters := cache.storage.GetBackendCounters("ram")
+	ramCounters := cache.storage.GetBackendCounters(storage.RamBackend)
 	fmt.Printf("RAM Hits: %d\n", ramCounters.Hits)
 	fmt.Printf("RAM Misses: %d\n", ramCounters.Misses)
 	fmt.Printf("RAM Hit Ratio: %d%%\n", int(ramCounters.HitRatio*100))
+	fmt.Printf("RAM performance gets/s: %d\n", int(ramCounters.GetsPerSecond))
+	fmt.Printf("RAM performance get MB/s: %d\n", int(ramCounters.GetBytesPerSecond/1024/1024))
+	fmt.Printf("RAM performance sets/s: %d\n", int(ramCounters.SetsPerSecond))
+	fmt.Printf("RAM performance set MB/s: %d\n", int(ramCounters.SetBytesPerSecond/1024/1024))
+	// redis counters
+	redisCounters := cache.storage.GetBackendCounters(storage.RedisBackend)
+	fmt.Printf("Redis performance gets/s: %d\n", int(redisCounters.GetsPerSecond))
+	fmt.Printf("Redis performance get kB/s: %d\n", int(redisCounters.GetBytesPerSecond/1024))
+	fmt.Printf("Redis performance sets/s: %d\n", int(redisCounters.SetsPerSecond))
+	fmt.Printf("Redis performance set kB/s: %d\n", int(redisCounters.SetBytesPerSecond/1024))
 	// error counters
 	storageCounters := cache.storage.GetCounters()
 	fmt.Printf("CacheErr: %d\n", storageCounters.CacheErr)

@@ -39,18 +39,34 @@ type BackendCheckResult struct {
 }
 
 type Counters struct {
-	SerErr   uint64
-	CacheErr uint64
-	Hits     uint64
-	Misses   uint64
-	HitRatio float64
+	SerErr            uint64
+	CacheErr          uint64
+	Hits              uint64
+	Misses            uint64
+	HitRatio          float64
+	Gets              uint64
+	Sets              uint64
+	GetBytes          uint64
+	SetBytes          uint64
+	GetNanoseconds    uint64
+	SetNanoseconds    uint64
+	GetsPerSecond     float64
+	SetsPerSecond     float64
+	GetBytesPerSecond float64
+	SetBytesPerSecond float64
 }
 
 type atomicCounters struct {
-	serErr   atomic.Uint64
-	cacheErr atomic.Uint64
-	hits     atomic.Uint64
-	misses   atomic.Uint64
+	serErr         atomic.Uint64
+	cacheErr       atomic.Uint64
+	hits           atomic.Uint64
+	misses         atomic.Uint64
+	gets           atomic.Uint64
+	sets           atomic.Uint64
+	getBytes       atomic.Uint64
+	setBytes       atomic.Uint64
+	getNanoseconds atomic.Uint64
+	setNanoseconds atomic.Uint64
 }
 
 type Base struct {
@@ -118,13 +134,27 @@ func (base *Base) GetCounters() Counters {
 
 func (counters *atomicCounters) Get() Counters {
 	c := Counters{
-		SerErr:   counters.serErr.Load(),
-		CacheErr: counters.cacheErr.Load(),
-		Hits:     counters.hits.Load(),
-		Misses:   counters.misses.Load(),
+		SerErr:         counters.serErr.Load(),
+		CacheErr:       counters.cacheErr.Load(),
+		Hits:           counters.hits.Load(),
+		Misses:         counters.misses.Load(),
+		Gets:           counters.gets.Load(),
+		Sets:           counters.sets.Load(),
+		GetBytes:       counters.getBytes.Load(),
+		SetBytes:       counters.setBytes.Load(),
+		GetNanoseconds: counters.getNanoseconds.Load(),
+		SetNanoseconds: counters.setNanoseconds.Load(),
 	}
 	if numReqs := c.Hits + c.Misses; numReqs != 0 {
 		c.HitRatio = float64(c.Hits) / float64(numReqs)
+	}
+	if c.GetNanoseconds > 0 {
+		c.GetsPerSecond = float64(c.Gets) / (float64(c.GetNanoseconds) / float64(1e9))
+		c.GetBytesPerSecond = float64(c.GetBytes) / (float64(c.GetNanoseconds) / float64(1e9))
+	}
+	if c.SetNanoseconds > 0 {
+		c.SetsPerSecond = float64(c.Sets) / (float64(c.SetNanoseconds) / float64(1e9))
+		c.SetBytesPerSecond = float64(c.SetBytes) / (float64(c.SetNanoseconds) / float64(1e9))
 	}
 	return c
 }
